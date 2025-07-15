@@ -30,8 +30,9 @@ For support, please use the OWA community forum: https://github.com/orgs/OpenWat
 - [Contributing](#contributing)
 - [Recommendation](#recommendation)
 - [List of Python Class Functions](#list-of-python-class-functions)
+- [List of MSX Functions](#list-of-msx-functions)
 - [List of EPANET 2.2 Functions](#list-of-epanet-22-functions)
-  
+- [List of EPANET MSX Functions API](#list-of-epanet-msx-functions-api)
 ## How to cite 
 
 Kyriakou, M. S., Demetriades, M., Vrachimis, S. G., Eliades, D. G., & Polycarpou, M. M. (2023). EPyT: An EPANET-Python Toolkit for Smart Water Network Simulations. Journal of Open Source Software, 8(92), 5947. https://doi.org/10.21105/joss.05947
@@ -283,6 +284,7 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | getNodeReservoirCount             |Retrieves the number of Reservoirs
 | getNodeReservoirIndex             |Retrieves the indices of reservoirs
 | getNodeReservoirNameID            |Retrieves the reservoir ID label
+| getNodeReservoirHeadPatternIndex  |Retrieves the indices of all reservoir head patterns
 | getNodeResultIndex                |Retrieves the order in which a node's results were saved to an output file
 | getNodeSourcePatternIndex         |Retrieves the value of all node source pattern index
 | getNodeSourceQuality              |Retrieves the value of all node source quality
@@ -448,6 +450,7 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | setNodeComment                    |Sets the comment string assigned to the node object
 | setNodeCoordinates                |Sets node coordinates
 | setNodeDemandPatternIndex         |Sets the values of demand time pattern indices
+| setNodeReservoirHeadPatternIndex  |Sets the pattern index for a reservoir node head
 | setNodeElevations                 |Sets the values of elevation for nodes
 | setNodeEmitterCoeff               |Sets the values of emitter coefficient for nodes
 | setNodeInitialQuality             |Sets the values of initial quality for nodes
@@ -616,6 +619,100 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | exportMSXts                       |Exports multi-species water-quality time-series results to an Excel workbook—one sheet per species|
 | exportMSXstatistics               |Summarizes min, max, and average values for each node in an Excel file|
 
+## List of MSX Functions 
+|Function|Description|
+|---------|----------|            
+| addMSXPattern                   | Adds a new, empty MSX source time pattern to the project |
+| getMSXAreaUnits                 | Retrieves the area units (FT2/M2/CM2) |
+| getMSXAtol                      | Retrieves the absolute concentration tolerance |
+| getMSXCompiler                  | Retrieves the compiler (NONE/VC/GC) |
+| getMSXComputedLinkQualitySpecie | Returns the link quality for specific specie |
+| getMSXComputedNodeQualitySpecie | Returns the node quality for specific specie |
+| getMSXComputedQualityLink       | Returns the computed quality for links. |
+| getMSXComputedQualityNode       | Retrieves the concentration of a chemical species at a specific node of the network at the current simulation time step. |
+| getMSXComputedQualitySpecie     | Retrieves the quality values for specific specie (e.g getMSXComputedQualitySpecie('CL2')) |
+| getMSXComputedQualitySpecie     | Retrieves the quality values for specific specie (e.g getMSXComputedQualitySpecie(['CL2'])) |
+| getMSXConstantsCount            | Retrieves the number of constants |
+| getMSXConstantsIndex            | Retrieves the internal index number of constants (given its ID name) |
+| getMSXConstantsNameID           | Retrieves the ID name of constants (given its internal index number) |
+| getMSXConstantsValue            | Retrieves the constant's value. |
+| getMSXCoupling                  | Retrieves the coupling (FULL/NONE) |
+| getMSXEquationsPipes            | Retrieves the species dynamics in pipes |
+| getMSXEquationsTanks            | Retrieves the species dynamics in tanks |
+| getMSXEquationsTerms            | Retrieves the species dynamics in terms |
+| getMSXError                     | Returns the text for an error message given its error code |
+| getMSXLinkInitqualValue         | Retrieves the initial concentration of chemical species assigned to links of the pipe network |
+| getMSXNodeInitqualValue         | Retrieves the initial concentration of chemical species assigned to nodes |
+| getMSXOptions                   | Retrieves all the msx option parameters |
+| getMSXParametersCount           | Retrieves the number of parameters |
+| getMSXParametersIndex           | Retrieves the indices of parameters |
+| getMSXParametersNameID          | Retrieves the ID name of parameters |
+| getMSXParametersPipesValue      | Retrieves the value of reaction parameters for pipes |
+| getMSXParametersTanksValue      | Retrieves the value of reaction parameters for tanks |
+| getMSXPattern                   | Retrieves the multiplier factor for all patterns and all times |
+| getMSXPatternValue              | Retrieves the multiplier at a specific time period for a given source time pattern |
+| getMSXPatternsCount             | Retrieves the number of patterns |
+| getMSXPatternsIndex             | Retrieves the indices of patterns |
+| getMSXPatternsLengths           | Retrieves the number of time periods in all or some patterns |
+| getMSXPatternsNameID            | Retrieves the patterns IDs |
+| getMSXRateUnits                 | Retrieves the rate/time units (SEC/MIN/HR/DAY) |
+| getMSXRtol                      | Retrieves the relative concentration tolerance |
+| getMSXSolver                    | Retrieves the solver method. |
+| getMSXSourceLevel               | Retrieves the value of all nodes source level |
+| getMSXSourceNodeNameID          | Retrieves the ID label of all nodes |
+| getMSXSourcePatternIndex        | Retrieves the value of all node source pattern index |
+| getMSXSourceType                | Retrieves the value of all node source type |
+| getMSXSources                   | Retrieves Msx sources |
+| getMSXSpeciesATOL               | Retrieves the atol |
+| getMSXSpeciesConcentration      | Retrieves the concentration of chemical species for nodes and links |
+| getMSXSpeciesCount              | Retrieves the number of species |
+| getMSXSpeciesIndex              | Retrieves the indices of species |
+| getMSXSpeciesNameID             | Retrieves the species IDs |
+| getMSXSpeciesRTOL               | Retrieves the rtol |
+| getMSXSpeciesType               | Retrieves the type of all species (BULK/WALL) |
+| getMSXSpeciesUnits              | Retrieves the species mass units |
+| getMSXTimeStep                  | Retrieves the time step |
+| getMethods                      | Returns all methods of epanet |
+| loadMSXFile        			  | Loads an msx file |
+| initializeMSXQualityAnalysis    | Initializes the MSX system before solving for water quality results in step-wise fashion |
+| plotMSXSpeciesLinkConcentration | Plots concentration of species for links over time. |
+| plotMSXSpeciesNodeConcentration | Plots concentration of species for nodes over time. |
+| saveMSXFile                     | Saves the data associated with the current MSX project into a new MSX input file |
+| saveMSXQualityFile              | Saves water quality results computed for each node, link and reporting time period to a named binary file |
+| setMSXAreaUnitsCM2              | Sets area units to CM2 |
+| setMSXAreaUnitsFT2              | Sets area units to FT2 |
+| setMSXAreaUnitsM2               | Sets area units to M2 |
+| setMSXAtol                      | Sets the value of Atol |
+| setMSXCompilerGC                | Sets compilet to GC |
+| setMSXCompilerNONE              | Sets compiler to None |
+| setMSXCompilerVC                | Sets compiler to VC |
+| setMSXConstantsValue            | Assigns a new value to a specific reaction constant |
+| setMSXCouplingFULL              | Sets coupling option to FULL |
+| setMSXCouplingNONE              | Sets coupling option to NONE |
+| setMSXLinkInitqualValue         | Assigns an initial concentration of chemical species to links |
+| setMSXNodeInitqualValue         | Assigns an initial concentration of chemical species to nodes |
+| setMSXParametersPipesValue      | Assigns a value to a particular reaction parameter for given pipes |
+| setMSXParametersTanksValue      | Assigns a value to a particular reaction parameter for given tanks |
+| setMSXPattern                   | Sets all of the multiplier factors for a specific time pattern |
+| setMSXPatternMatrix             | Sets the multiplier factors for all patterns |
+| setMSXPatternValue              | Assigns a new value to the multiplier for a specific time period in a given MSX source time pattern |
+| setMSXRateUnitsDAY              | Sets rate units to DAY |
+| setMSXRateUnitsHR               | Sets rate units to HR |
+| setMSXRateUnitsMIN              | Sets rate units to MIN |
+| setMSXRateUnitsSEC              | Sets rate units to SEC |
+| setMSXRtol                      | Sets the value of Rtol |
+| setMSXSolverEUL                 | Sets solver to EUL (standard Euler integrator) |
+| setMSXSolverRK5                 | Sets solver to RK5 (Runge-Kutta 5th order integrator) |
+| setMSXSolverROS2                | Sets solver to ROS2 (2nd order Rosenbrock integrator) |
+| setMSXSources                   | Sets the attributes of an external source of a particular chemical species to a specific node of the pipe network |
+| setMSXTimeStep                  | Sets time step |
+| solveMSXCompleteHydraulics      | Solves for system hydraulics over the entire simulation period saving results to an internal scratch file |
+| solveMSXCompleteQuality         | Solves for water quality over the entire simulation period and saves the results to an internal scratch file |
+| stepMSXQualityAnalysisTimeLeft  | Advances the water quality solution through a single water quality time step when performing a step-wise simulation |
+| useMSXHydraulicFile             | Uses a previously saved EPANET hydraulics file as the source of hydraulic information |
+| unloadMSX                       | Unloads MSX file |
+| writeMSXFile                    | Write a new MSX file |
+| writeMSXReport                  | Writes MSX report |
 
 ## List of EPANET 2.2 Functions 
 
@@ -750,5 +847,43 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 |ENstepQ|Advances a water quality simulation by a single water quality time step
 |ENusehydfile|Uses a previously saved binary hydraulics file to supply a project's hydraulics
 |ENwriteline|Writes a line of text to a project's report file
+
+## List of EPANET MSX Functions API
+
+| Function           | Description                                                                                                                              |
+|--------------------|------------------------------------------------------------------------------------------------------------------------------------------|
+| MSXaddpattern      | Adds a new empty MSX source time pattern to an MSX project |
+| MSXclose           | Close .msx file |
+| MSXerror           | Retrieves the MSX erorr message for specific erorr code |
+| MSXgetID           | Retrieves the ID name of an object given its internal index number |
+| MSXgetIDlen        | Retrieves the number of characters in the ID name of an MSX object given its internal index number |
+| MSXgetconstant     | Retrieves the value of a particular rection constant |
+| MSXgetcount        | Retrieves the number of objects of a specific type |
+| MSXgeterror        | Returns the text for an error message given its error code |
+| MSXgetindex        | Retrieves the number of objects of a specific type |
+| MSXgetinitqual     | Retrieves the intial concetration of a particular chemical species assigned to a specific node or link of the pipe network |
+| MSXgetparameter    | Retrieves the value of a particular reaction parameter for a given pipe |
+| MSXgetpatternlen   | Retrieves the number of time periods within a source time pattern |
+| MSXgetpatternvalue | Retrieves the multiplier at a specific time period for a given source time pattern |
+| MSXgetqual         | Retrieves a chemical species concentration at a given node or the average concentration along a link at the current sumulation time step |
+| MSXgetsource       | Retrieves information on any external source of a particular chemical species assigned to a specific node or link of the pipe network |
+| MSXgetspecies      | Retrieves the attributes of a chemical species given its internal index number |
+| MSXinit            | Initialize the MSX system before solving for water quality results in the step-wise fashion |
+| MSXopen            | Opens .MSX file |
+| MSXreport          | Writes water quality simulations results as instructed by MSX input file to a text file |
+| MSXsavemsxfile     | Saves the data associated with the current MSX project into a new MSX input file |
+| MSXsaveoutfile     | Saves water quality results computed for each node, link and reporting time period to a named binary file |
+| MSXsetconstant     | Assigns a new value to a specific reaction constant |
+| MSXsetinitqual     | Assigns an initial concetration of a particular chemical species node or link of the pipe network |
+| MSXsetparameter    | Assigns a value to a particular reaction parameter for a given pipe or tank within the pipe network |
+| MSXsetpattern      | Assigns a new set of multipliers to a given MSX source time pattern |
+| MSXsetpatternvalue | Assigns a new value to the multiplier for a specific time period in a given MSX source time pattern |
+| MSXsetsource       | Sets the attributes of an external source of particular chemical species to specific node of the pipe network |
+| MSXsolveH          | Solves for system hydraulics over the entire simulation period saving results to an internal scratch file |
+| MSXsolveQ          | Solves for water quality over the entire simulation period and saves the results to an internal scratch file |
+| MSXstep            | Advances the water quality solution through a single water quality time step when performing a step-wise simulation |
+| MSXusehydfile      | Uses a previously saved EPANET hydraulics file as the source of hydraulic information |
+
+
 
 &uparrow; [Back to top](#table-of-contents)
