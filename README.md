@@ -613,6 +613,8 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | setMSXNodeInitqualValue           |Assigns an initial concentration of chemical species to nodes|
 | setMSXSources                     |Sets the attributes of an external source of a particular chemical species to a specific node of the pipe network|
 | useMSXHydraulicFile               |Uses a previously saved EPANET hydraulics file as the source of hydraulic information|
+| exportMSXts                       |Exports multi-species water-quality time-series results to an Excel workbook—one sheet per species|
+| exportMSXstatistics               |Summarizes min, max, and average values for each node in an Excel file|
 
 
 ## List of EPANET 2.2 Functions 
