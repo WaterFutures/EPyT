@@ -186,7 +186,7 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | getCMDCODE                        |Retrieves the CMC code|
 | getComputedHydraulicTimeSeries    |Computes hydraulic simulation and retrieves all time-series
 | getComputedQualityTimeSeries      |Computes Quality simulation and retrieves all or some time-series
-| getComputedTimeSeries             |Run analysis with binary fil
+| getComputedTimeSeries             |Run analysis with binary file
 | getConnectivityMatrix             |Retrieve the Connectivity Matrix of the networ
 | getControlRulesCount              |Retrieves the number of controls
 | getControls                       |Retrieves the parameters of all control statements
