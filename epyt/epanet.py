@@ -868,39 +868,6 @@ class epanet(error_handler):
             d = epanet(inpname, msx=True,customlib=epanetlib)
      """
 
-    """
-    def __getattribute__(self, function_id):
-        # Call the superclass's __getattribute__ to retrieve the attribute
-        attr = super().__getattribute__(function_id)
-        
-        if callable(attr) and not function_id.startswith("__") and not function_id.startswith("_") and not function_id.startswith("EN")\
-                and not function_id.startswith("printv")and not function_id.startswith("MSX")and not function_id.startswith("test")and not function_id.startswith("load"):
-            # Create a _wrapper function to include additional actions
-            def _wrapper(*args, **kwargs):
-                result = attr(*args, **kwargs)  # Call the actual function
-
-                if hasattr(self, 'api') and self.api.errcode != 0 and function_id != "_logFunctionError" and function_id != "getError":
-                    # Log function error by passing the function name
-                    message = self.api.ENgeterror(self.api.errcode)
-                    self._logFunctionError(function_id, message)
-
-                    # Capture the current stack to find where the function was called and where the error happened
-                    tb_lines = traceback.extract_stack()
-                    red_text = "\033[91m"
-                    reset_text = "\033[0m"
-
-                    if len(tb_lines) >= 2:
-                        # This is where the function was called from (main program)
-                        caller_line = tb_lines[-2]
-                        caller_output = f"{caller_line.filename}:{red_text}{caller_line.lineno}, line {caller_line.lineno}: {caller_line.line}{reset_text}"
-                        print(f"{caller_output}")
-
-                return result
-
-            return _wrapper
-
-        return attr
-    """
 
     def __init__(self, *argv, version=2.2, ph=False, loadfile=False, customlib=None, display_msg=True,
                  display_warnings=True):
@@ -15579,15 +15546,6 @@ class epanet(error_handler):
         for index in args:
             results.append(int(self.api.ENgetnodevalue(index, self.ToolkitConstants.EN_NODE_INCONTROL)))
         return results
-
-    def _logFunctionError(self, nameofFunction, message):
-        """Notifies the user where the error is coming from with red text."""
-
-        # ANSI escape code for red text
-        red_text = "\033[91m"
-        reset_text = "\033[0m"
-
-        print(f"{red_text}UserWarning: Error in function: {nameofFunction},{message}{reset_text}")
 
     def _ErrorinChangingMetric(self, wanted, nameofFunction):
         "Checks if the metric change is not possible and suggest possbile solutions"
