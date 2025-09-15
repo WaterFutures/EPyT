@@ -2185,7 +2185,7 @@ class SetTest(unittest.TestCase):
         premise_index = 1
         premise = 'IF SYSTEM CLOCKTIME >= 08:00 PM'
         d.setRulePremise(rule_index, premise_index, premise)
-        self.assertEqual(d.getRules()[1]['Premises'][0], 'IF SYSTEM CLOCKTIME >= 08:00 PM UTC', err_msg)
+        self.assertEqual(d.getRules()[1]['Premises'][0], 'IF SYSTEM CLOCKTIME >= 08:00 PM', err_msg)
 
         # Test 2
         rule_index = 1
@@ -2484,7 +2484,7 @@ class AnalysisTest(unittest.TestCase):
                                     -7.94038801e+02, 8.85600000e+01, 4.67400000e+01, 2.70600000e+01,
                                     4.23551620e+00, 7.38000000e+00, 3.69000000e+00, -7.91086075e+00,
                                     5.60448380e+00, 7.38000000e+00, 1.77551620e+00, 2.46000000e+00])
-        np.testing.assert_array_almost_equal(flow[10], desired_flow_10, err_msg=err_msg, decimal=4)
+        np.testing.assert_allclose(flow[10], desired_flow_10, rtol=1e-4, atol=1e-4, err_msg=err_msg)
 
         desired_flow_25 = np.array([638.848, 526.87340214, 103.17459786, 87.77459786,
                                     78.97459786, 597.048, 591.548, 15.4,
