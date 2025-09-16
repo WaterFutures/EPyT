@@ -1,17 +1,15 @@
+"""
+EPANET Python Toolkit (EPyT) Test Part 5
+This file is provided to ensure that all functions can be executed correctly.
+Step-by-step execution. You may also use breakpoints.
+"""
+
 from epyt import epanet
-
-# inpfile = "Richmond_standard.inp"
-
-# #Warning that a link is missing and the network is not fully connected
-# inpfile = "BrokenNetwork.inp"
-# d = epanet(inpfile)
-# d.unload()
 
 inpfile = "Net1.inp"
 d = epanet(inpfile)
+# Setcurve
 
-# d.getNodeNameID('dakjsdfhjksdfhsd')
-# setcurvetype functions
 d.setCurveTypePump(1)
 d.printv(d.getCurveType(1))
 d.setCurveTypeVolume(1)
