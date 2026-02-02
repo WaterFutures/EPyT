@@ -83,11 +83,23 @@ from pathlib import Path
 from shutil import copyfile
 from types import SimpleNamespace
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from matplotlib import cm
+
+try:
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+except ImportError:
+    warnings.warn("matplotlib is not installed. Plotting functions will not work.")
+
+try:
+    import numpy as np
+except ImportError:
+    warnings.warn("numpy is not installed. Some functions will not work.")
+
+try:
+    import pandas as pd
+except ImportError:
+    warnings.warn("pandas is not installed. Excel functions will not work.")
 
 epyt_root = str(files("epyt"))
 
