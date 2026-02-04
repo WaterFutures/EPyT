@@ -10,8 +10,8 @@
        Computed hydraulics.
        Unload library.
 """
-from epyt import epanet
 import matplotlib.pyplot as plt
+from epyt import epanet
 
 # Close any open figures
 plt.close("all")
@@ -20,7 +20,7 @@ plt.close("all")
 d = epanet('Net1.inp')
 
 # Computed Hydraulic & Quality Time Series using binary file.
-Results = d.getComputedTimeSeries()
+Results = d.getComputedTimeSeries_ENepanet()
 
 nodeID = '10'
 indexNode = d.getNodeIndex(nodeID)

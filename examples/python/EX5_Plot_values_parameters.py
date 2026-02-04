@@ -12,7 +12,7 @@
 from epyt import epanet
 
 # Load Network Net1
-d = epanet('Net1.inp')
+d = epanet('Net1.inp', loadfile=True)
 
 # Close any open figures
 d.plot_close()
@@ -22,7 +22,7 @@ Elevations = d.getNodeElevations()
 d.plot(node_values=Elevations, colorbar='Oranges')
 
 # Plot Pressure at hour 10
-res = d.getComputedTimeSeries()
+res = d.getComputedHydraulicTimeSeries(['flow', 'pressure'])
 d.plot(node_values=res.Pressure[10, :], title='Pressure at hour 10')
 
 # Plot Flow at hour 10

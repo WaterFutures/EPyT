@@ -10,8 +10,9 @@
         Run time d.getComputedTimeSeries.
         
 """
-from epyt import epanet
 import time
+
+from epyt import epanet
 
 # Load a network.
 d = epanet('Net1.inp')
@@ -44,6 +45,7 @@ pipeindex = 4 - 1
 nodeindex = 6 - 1
 
 # Step by step hydraulic analysis.
+starth_step = time.time()
 d.openHydraulicAnalysis()
 d.initializeHydraulicAnalysis()
 tstep, P, T_H, D, H, F = 1, [], [], [], [], []
@@ -53,24 +55,38 @@ while tstep > 0:
     D.append(d.getNodeActualDemand())
     H.append(d.getNodeHydraulicHead())
     F.append(d.getLinkFlows())
-    T_H.append(t/3600)
+    T_H.append(t / 3600)
     tstep = d.nextHydraulicAnalysisStep()
 d.closeHydraulicAnalysis()
+stoph_step = time.time()
 
 # Step by step quality analysis.
-d.setTimeSimulationDuration(86400)
-d.setTimeQualityStep(3600)
-d.solveCompleteHydraulics() 
+d.solveCompleteHydraulics()
+startq_step = time.time()
 d.openQualityAnalysis()
 d.initializeQualityAnalysis()
 tleft, P, T_Q, Q = 1, [], [], []
 sim_duration = d.getTimeSimulationDuration()
-while tleft > 0 or t < sim_duration:
+while tleft > 0:
     t = d.runQualityAnalysis()
     Q.append(d.getNodeActualQuality())
-    T_Q.append(t/3600)
+    T_Q.append(t / 3600)
     tleft = d.stepQualityAnalysisTimeLeft()
 d.closeQualityAnalysis()
+stopq_step = time.time()
+
+# Using API functions
+start_api = time.time()
+d.api.ENopenH()
+d.api.ENinitH(d.ToolkitConstants.EN_NOSAVE)
+tstep, P, T_H, = 1, [], []
+while tstep > 0:
+    t = d.api.ENrunH()
+    P.append(d.api.ENgetnodevalues(d.ToolkitConstants.EN_PRESSURE))
+    T_H.append(t)
+    tstep = d.api.ENnextH()
+d.api.ENcloseH()
+stop_api = time.time()
 
 # Unload library.
 d.unload()
@@ -80,35 +96,35 @@ print(f'\nSimulation duration: {hours} hours\n')
 print(f'Run Time of function d.getComputedTimeSeries: {stop_results - start_results:.5}  (sec)')
 print(f'Run Time of function d.getComputedHydraulicTimeSeries: {stop_hydraulic - start_hydraulic:.5} (sec)')
 print(f'Run Time of function d.getComputedQualityTimeSeries: {stop_quality - start_quality:.5} (sec)')
+print(f'Run Time of function step by step Hydraulic: {stoph_step - starth_step:.5} (sec)')
+print(f'Run Time of function step by step Quality: {stopq_step - startq_step:.5} (sec)')
+print(f'Run Time of function API hydraulics: {stop_api - start_api:.5} (sec)')
 
-
-d.plot_ts(X=Results.Time/3600, Y=Results.Flow[:, pipeindex], title='d.getComputedTimeSeries (Ignore events)',
+d.plot_ts(X=Results.Time / 3600, Y=Results.Flow[:, pipeindex], title='d.getComputedTimeSeries (Ignore events)',
           xlabel='Time (hrs)', ylabel='Flow (' + d.LinkFlowUnits + ') - Link ID "' + d.LinkNameID[pipeindex] + '"',
           marker=None, fontsize=8)
 
-
-d.plot_ts(X=Hydraulics.Time/3600, Y=d.to_array(F)[:, pipeindex], title='d.getComputedHydraulicTimeSeries',
+d.plot_ts(X=Hydraulics.Time / 3600, Y=d.to_array(F)[:, pipeindex], title='d.getComputedHydraulicTimeSeries',
           xlabel='Time (hrs)', ylabel='Flow (' + d.LinkFlowUnits + ') - Link ID "' + d.LinkNameID[pipeindex] + '"',
           marker=None, fontsize=8)
-
 
 d.plot_ts(X=T_H, Y=d.to_array(F)[:, pipeindex], title='step by step Hydraulic Analysis',
           xlabel='Time (hrs)', ylabel='Flow (' + d.LinkFlowUnits + ') - Link ID "' + d.LinkNameID[pipeindex] + '"',
           marker=None, fontsize=8)
 
-
-d.plot_ts(X=Results.Time/3600, Y=Results.NodeQuality[:, nodeindex], title='d.getComputedTimeSeries (Ignore events)',
-          xlabel='Time (hrs)', ylabel='Node Quality (' + d.QualityChemUnits + ') - Node ID "' + d.NodeNameID[nodeindex] + '"',
+d.plot_ts(X=Results.Time / 3600, Y=Results.NodeQuality[:, nodeindex], title='d.getComputedTimeSeries (Ignore events)',
+          xlabel='Time (hrs)',
+          ylabel='Node Quality (' + d.QualityChemUnits + ') - Node ID "' + d.NodeNameID[nodeindex] + '"',
           marker=None, fontsize=8)
 
-
-d.plot_ts(X=Quality.Time/3600, Y=Quality.NodeQuality[:, nodeindex], title='d.getComputedQualityTimeSeries',
-          xlabel='Time (hrs)', ylabel='Node Quality (' + d.QualityChemUnits + ') - Link ID "' + d.NodeNameID[nodeindex] + '"',
+d.plot_ts(X=Quality.Time / 3600, Y=Quality.NodeQuality[:, nodeindex], title='d.getComputedQualityTimeSeries',
+          xlabel='Time (hrs)',
+          ylabel='Node Quality (' + d.QualityChemUnits + ') - Link ID "' + d.NodeNameID[nodeindex] + '"',
           marker=None, fontsize=8)
-
 
 d.plot_ts(X=T_Q, Y=d.to_array(Q)[:, pipeindex], title='step by step Quality Analysis',
-          xlabel='Time (hrs)', ylabel='Node Quality (' + d.QualityChemUnits + ') - Link ID "' + d.NodeNameID[nodeindex] + '"',
+          xlabel='Time (hrs)',
+          ylabel='Node Quality (' + d.QualityChemUnits + ') - Link ID "' + d.NodeNameID[nodeindex] + '"',
           marker=None, fontsize=8)
 
 # Show the plots (plt.show())
