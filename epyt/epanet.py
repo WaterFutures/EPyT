@@ -58,6 +58,7 @@
    implied. See the Licence for the specific language governing
    permissions and limitations under the Licence.
 """
+import glob
 import json
 import math
 import os
@@ -76,7 +77,7 @@ from functools import partial, lru_cache
 from inspect import getmembers, isfunction, currentframe, getframeinfo
 from pathlib import Path
 from shutil import copy2
-import glob
+
 from .src.epanet_cffi_compat import cdll, byref, create_string_buffer, c_char_p
 
 try:
@@ -423,8 +424,7 @@ class epanet:
 
         # Enums
         self.type_lists = EpytEnums()
-        for attr, value in self.type_lists.as_dict().items():
-            setattr(self, attr, value)
+        self.__dict__.update(self.type_lists.as_dict())
 
         # Initial attributes
         self.classversion = __version__
@@ -433,6 +433,7 @@ class epanet:
         if self.display_msg and self.customlib is None:
             print(f'EPANET version {self.getVersion()} '
                   f'loaded (EPyT version v{self.classversion} - Last Update: {__lastupdate__}).')
+            print('Publication DOI: https://zenodo.org/records/18484878');
 
         # ToolkitConstants: Contains all parameters from epanet2_2.h
         self.ToolkitConstants = EpanetConstants()
@@ -474,7 +475,11 @@ class epanet:
 
             copy2(self.InputFile, self.TempInpFile)
 
-            self.api.ENopenX(self.TempInpFile, self.RptTempfile, self.BinTempfile)
+            if ph:
+                self.api.ENopenX(self.TempInpFile, self.RptTempfile, self.BinTempfile)
+            else:
+                self.api.ENopen(self.TempInpFile, self.RptTempfile, self.BinTempfile)
+
             if (self.api.errcode >= 200 and self.api.errcode < 300):
                 self.api.ENclose()  # close the file and fetch report contents
                 with open(self.RptTempfile, "r") as f:
@@ -2081,10 +2086,8 @@ class epanet:
         tankrescount = self.api.ENgetcount(self.ToolkitConstants.EN_TANKCOUNT)
         junctioncount = nNodes - tankrescount
         rescount = np.count_nonzero(idx == self.ToolkitConstants.EN_RESERVOIR)
-        dur = self.api.ENgettimeparam(self.ToolkitConstants.EN_DURATION)
         k, tstep = 1, 1
-        t = 0
-        while tstep > 0 and (t != dur):
+        while tstep > 0:
             t = self.api.ENrunH()
             value.Time.append(t)
             if 'pressure' in attrs:
@@ -2194,18 +2197,16 @@ class epanet:
         value = EpytValues()
 
         if not self.api.solve:
-            self.solveCompleteHydraulics()
+            self.api.ENsolveH()
             self.api.solve = 1
 
-        self.openQualityAnalysis()
-        self.initializeQualityAnalysis()
+        self.api.ENopenQ()
+        self.api.ENinitQ(self.ToolkitConstants.EN_SAVE)
 
         if len(argv) == 0:
             attrs = ['time', 'nodequality', 'linkquality', 'mass']
-            sensing_indices = None
         else:
             attrs = argv[0]
-            sensing_indices = argv[1] if len(argv) > 1 else None
 
         attrs = [a.lower() for a in attrs]
 
@@ -2219,42 +2220,28 @@ class epanet:
         if 'demand' in attrs:
             value.Demand = {}
 
-        if 'qualitysensingnodes' in attrs:
-            if sensing_indices is None:
-                raise ValueError("Provide sensing node indices as the second argument for 'qualitySensingNodes'.")
-            value.QualitySensingNodes = {}
-            value.SensingNodesIndices = sensing_indices
-
-        if 'demandsensingnodes' in attrs:
-            if sensing_indices is None:
-                raise ValueError("Provide sensing node indices as the second argument for 'demandSensingNodes'.")
-            value.DemandSensingNodes = {}
-            value.SensingNodesIndices = sensing_indices
-
-        sim_duration = self.getTimeSimulationDuration()
+        sim_duration = self.api.ENgettimeparam(self.ToolkitConstants.EN_DURATION)
         k = 1
-        t = 0
         tleft = 1
-
-        while tleft > 0 and t < sim_duration:
-            t = self.runQualityAnalysis()
+        while tleft > 0:
+            t = self.api.ENrunQ()
 
             value.Time.append(t)
             if 'nodequality' in attrs:
-                value.NodeQuality[k] = self.getNodeActualQuality()
+                value.NodeQuality[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_QUALITY)
             if 'linkquality' in attrs:
-                value.LinkQuality[k] = self.getLinkActualQuality()
+                value.LinkQuality[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_QUALITY)
             if 'mass' in attrs:
-                value.MassFlowRate[k] = self.getNodeMassFlowRate()
+                value.MassFlowRate[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_SOURCEMASS)
             if 'demand' in attrs:
-                value.Demand[k] = self.getNodeActualDemand()
+                value.Demand[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_DEMAND)
 
             if t < sim_duration:
                 tleft = self.stepQualityAnalysisTimeLeft()
 
             k += 1
 
-        self.closeQualityAnalysis()
+        self.api.ENcloseQ()
 
         value.Time = np.array(value.Time)
 
