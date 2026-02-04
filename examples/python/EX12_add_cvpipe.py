@@ -10,7 +10,7 @@
 from epyt import epanet
 
 # Load a network.
-d = epanet('Net1.inp')
+d = epanet('Net1.inp', loadfile=True)
 
 print('Add a CV pipe')
 

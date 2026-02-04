@@ -11,11 +11,12 @@
         Create gif from all the pngs.
         Unload library.
 """
-import matplotlib.pyplot as plt
-from epyt import epanet
-from PIL import Image
-import imageio
 import os
+
+import imageio
+import matplotlib.pyplot as plt
+from PIL import Image
+from epyt import epanet
 
 # Close all figures
 plt.close('all')
@@ -27,7 +28,7 @@ d = epanet('Net1.inp')
 new_gif_name = f'{d.netName[:-4]}_flows.gif'
 
 # Run analysis
-comp_analysis_vals = d.getComputedTimeSeries()
+comp_analysis_vals = d.getComputedHydraulicTimeSeries('flow')
 flows = comp_analysis_vals.Flow
 Time = comp_analysis_vals.Time / 3600
 

@@ -9,7 +9,7 @@
 from epyt import epanet
 
 # Load a network.
-d = epanet('Net1.inp')
+d = epanet('Net1.inp', loadfile=True)
 d.setQualityType('Chlorine', 'mg/L')
 initialQuality = 0.6
 nodeIndex = d.getNodeReservoirIndex()

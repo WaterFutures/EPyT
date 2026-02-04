@@ -6,11 +6,11 @@
       Get flows for the specific link index.
       Unload library.
 """
-from epyt import epanet
 import pandas as pd
+from epyt import epanet
 
 # Load a network.
-d = epanet('Net1.inp')
+d = epanet('Net1.inp', loadfile=True)
 
 # Link index for change the status.
 link_index = 2

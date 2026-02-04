@@ -10,8 +10,9 @@
     Unload library.
     
 """
-from epyt import epanet
 import random
+
+from epyt import epanet
 
 # Load a network.
 d = epanet('Net1.inp')

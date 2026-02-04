@@ -1,10 +1,23 @@
-from epyt.epanet import epanet, epanetmsxapi
-from epyt import networks
+## Writes MSX File e.g.Net2.msx.
+# This example contains: 
+# 
+# * Load a network. 
+# * Set Input Arguments: Filename Section Title Section Options Section Species 
+# Section Coefficients Section Terms Section Pipes Section Tanks Section Sources
+# Section Quality Global Section Quality Section Parameters Section Patterns. 
+# * Write MSX File.
+# * Load MSX File. 
+# * Compute. 
+# * Unload libraries.
 
 import os
+from time import sleep
 
-DIRNAME = os.path.dirname(networks.__file__)
-inpname = os.path.join(DIRNAME, 'msx-examples', 'net2-cl2.inp')
+from epyt import networks
+from epyt.epanet import epanet, epanetmsxapi
+
+nets = networks.inp_files()
+inpname = nets.net2_cl2
 d = epanet(inpname)
 
 msx = d.initializeMSXWrite()
@@ -19,7 +32,7 @@ msx.TIMESTEP = 1000
 msx.ATOL = 0.001
 msx.RTOL = 0.001
 
-msx.SPECIES = {'BULK CL2 MG 0.01 0.001','BULK TRS MG 0.001 0.0012'}
+msx.SPECIES = {'BULK CL2 MG 0.01 0.001', 'BULK TRS MG 0.001 0.0012'}
 
 msx.COEFFICIENTS = {'PARAMETER Kb 0.3', 'PARAMETER Kw 1'}
 msx.TERMS = {'Kf 1.5826e-4 * RE^0.88 / D'}
@@ -31,6 +44,8 @@ msx.QUALITY = {'NODE 26 CL2 0.1'}
 msx.PARAMETERS = {''}
 msx.PATERNS = {''}
 d.writeMSXFile(msx)
+sleep(.5)
+
 d.loadMSXFile(msx.FILENAME)
 d.unloadMSX()
 d.unload()

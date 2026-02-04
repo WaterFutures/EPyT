@@ -13,11 +13,12 @@
         Unload library.
 
 """
-import matplotlib.pyplot as plt
-from epyt import epanet
-from PIL import Image
-import imageio
 import os
+
+import imageio
+import matplotlib.pyplot as plt
+from PIL import Image
+from epyt import epanet
 
 # Close all figures
 plt.close('all')
@@ -29,9 +30,9 @@ d = epanet('Net1.inp')
 new_gif_name = f'{d.netName[:-4]}_pressures.gif'
 
 # Run Hydraulic analysis
-comp_analysis_vals = d.getComputedTimeSeries()
+comp_analysis_vals = d.getComputedHydraulicTimeSeries('pressure')
 pressures = comp_analysis_vals.Pressure
-Time = comp_analysis_vals.Time/3600
+Time = comp_analysis_vals.Time / 3600
 
 # Set the colorbar values based on the min/max of all the Pressure values
 minPressure = d.min(pressures)
@@ -40,7 +41,6 @@ maxPressure = d.max(pressures)
 # iterate through flow times
 figToPngNames = []
 for i, values in enumerate(pressures):
-
     hr = str(int(Time[i - 1]))
 
     d.plot(node_values=values, figure=False, min_colorbar=minPressure, max_colorbar=maxPressure,

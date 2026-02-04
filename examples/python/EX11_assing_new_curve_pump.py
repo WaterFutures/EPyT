@@ -12,7 +12,7 @@
 from epyt import epanet
 
 # Load a network.
-d = epanet('L-TOWN.inp')
+d = epanet('L-TOWN.inp', loadfile=True)
 
 # Add new curve in the network.
 indexCurve = d.addCurve('NewCurve', [1800, 300], [1500, 500])

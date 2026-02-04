@@ -6,12 +6,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from multiprocess import Pool, cpu_count
 
-from epyt import epanet
+from epyt import epanet, networks
 
 # Paths
-base_dir = os.path.dirname(os.path.abspath(__file__))
-inpname = os.path.join(base_dir, '..', '..', 'networks', 'asce-tf-wdst', 'Net1.inp')
-inpname = os.path.normpath(inpname)
+nets = networks.inp_files()
+inpname = nets.Net1
 
 # Number of simulations
 Nsim = 1000

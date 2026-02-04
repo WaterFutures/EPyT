@@ -8,10 +8,11 @@
    Create random status for pipes every hour.
    Unload library.
 """
-from epyt import epanet
-import pandas as pd
 import random
 import time
+
+import pandas as pd
+from epyt import epanet
 
 start = time.time()
 # Load inp file.
@@ -50,7 +51,7 @@ for u in range(hrs):
 
 print('Create random status')
 
-d.plot_ts(Y=pd.DataFrame(d.getComputedHydraulicTimeSeries().Flow), title='Change status of pipes every hour',
+d.plot_ts(Y=pd.DataFrame(d.getComputedHydraulicTimeSeries('flow').Flow), title='Change status of pipes every hour',
           xlabel='Time (hrs)', marker=False, color='b', fontsize=8)
 
 d.plot_show()

@@ -10,8 +10,9 @@
         Plot Quality VS Time.
         Unload library
 """
-from epyt import epanet
 import random
+
+from epyt import epanet
 
 
 def add_unc(ext, unc):

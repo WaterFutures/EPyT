@@ -2031,7 +2031,11 @@ class epanet:
                      'setting', 'energy', 'efficiency', 'state', 'linkleakagerate', 'nodeleakageflow', 'emitterflow',
                      'demanddelivered', 'demandrequested']
         else:
-            attrs = argv[0]
+            x = argv[0]
+            if isinstance(x, str):
+                attrs = [x.strip().lower()]
+            else:
+                attrs = [str(a).strip().lower() for a in x]
 
         value.Time = []
         if 'pressure' in attrs:
@@ -2206,7 +2210,11 @@ class epanet:
         if len(argv) == 0:
             attrs = ['time', 'nodequality', 'linkquality', 'mass']
         else:
-            attrs = argv[0]
+            x = argv[0]
+            if isinstance(x, str):
+                attrs = [x.strip().lower()]
+            else:
+                attrs = [str(a).strip().lower() for a in x]
 
         attrs = [a.lower() for a in attrs]
 
