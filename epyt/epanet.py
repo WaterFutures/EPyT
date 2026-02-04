@@ -70,15 +70,14 @@ import subprocess
 import sys
 import traceback
 import warnings
+from contextlib import suppress
 from datetime import datetime, timezone
 from functools import partial, lru_cache
-
-from .src.epanet_cffi_compat import cdll, byref, create_string_buffer, c_char_p
-
 from inspect import getmembers, isfunction, currentframe, getframeinfo
 from pathlib import Path
 from shutil import copy2
-from contextlib import suppress
+import glob
+from .src.epanet_cffi_compat import cdll, byref, create_string_buffer, c_char_p
 
 try:
     import matplotlib as mpl
@@ -421,7 +420,7 @@ class epanet:
         self.customlib = customlib
         self.MSXFile = None
         self.MSXTempFile = None
-        
+
         # Enums
         self.type_lists = EpytEnums()
         for attr, value in self.type_lists.as_dict().items():
@@ -2078,7 +2077,7 @@ class epanet:
         )
         find_pumps = idx == self.ToolkitConstants.EN_PUMP
         pumpcount = np.count_nonzero(find_pumps)
-        valvecount    = nLinks - pumpcount - pipecount
+        valvecount = nLinks - pumpcount - pipecount
         tankrescount = self.api.ENgetcount(self.ToolkitConstants.EN_TANKCOUNT)
         junctioncount = nNodes - tankrescount
         rescount = np.count_nonzero(idx == self.ToolkitConstants.EN_RESERVOIR)
@@ -2098,7 +2097,7 @@ class epanet:
                 value.Head[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_HEAD)
             if 'tankvolume' in attrs:
                 # Optimize: create array once instead of concatenating
-                num_non_tanks = junctioncount  + rescount
+                num_non_tanks = junctioncount + rescount
                 tank_volumes = self.getNodeTankVolume()
                 value.TankVolume[k] = np.concatenate((np.zeros(num_non_tanks), tank_volumes))
             if 'flow' in attrs:

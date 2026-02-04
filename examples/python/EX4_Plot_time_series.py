@@ -13,7 +13,7 @@
 from epyt import epanet
 
 # Load a network
-d = epanet('Net1.inp')
+d = epanet('Net1.inp', loadfile=True)
 
 # Close any open figures
 d.plot_close()
@@ -25,13 +25,15 @@ hyd_res = d.getComputedTimeSeries()
 # Change time-stamps from seconds to hours
 hrs_time = hyd_res.Time / 3600
 
-# Plot node pressures for specific nodes 
+units = d.getUnits()
+
+# Plot node pressures for specific nodes
 node_indices = [1, 3, 5]
 node_names = d.getNodeNameID(node_indices)
 for index in node_indices:
     d.plot_ts(X=hrs_time, Y=hyd_res.Pressure[:, index - 1],
               title=f'Pressure for the node id {d.getNodeNameID(index)}',
-              xlabel='Time (hrs)', ylabel=f'Pressure ({d.units.NodePressureUnits})',
+              xlabel='Time (hrs)', ylabel=f'Pressure ({units.NodePressureUnits})',
               marker=None)
 
 # Plot water velocity for specific links
@@ -40,7 +42,7 @@ link_names = d.getNodeNameID(link_indices)
 for index in link_indices:
     d.plot_ts(X=hrs_time, Y=hyd_res.Velocity[:, index - 1],
               title=f'Velocity for the link id {d.getLinkNameID(index)}',
-              xlabel='Time (hrs)', ylabel=f'Velocity ({d.units.LinkVelocityUnits})',
+              xlabel='Time (hrs)', ylabel=f'Velocity ({units.LinkVelocityUnits})',
               marker=None)
 
 # Plot water flow for specific links
@@ -48,7 +50,7 @@ link_indices = [2, 3, 9]
 for index in link_indices:
     d.plot_ts(X=hrs_time, Y=hyd_res.Flow[:, index - 1],
               title=f'Flow for the link id {d.getLinkNameID(index)}',
-              xlabel='Time (hrs)', ylabel=f'Flow ({d.units.LinkFlowUnits})',
+              xlabel='Time (hrs)', ylabel=f'Flow ({units.LinkFlowUnits})',
               marker=None)
 
 d.plot_show()
