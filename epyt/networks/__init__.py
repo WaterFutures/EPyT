@@ -1,22 +1,23 @@
 import os
 import re
 from importlib.resources import files
+from pathlib import Path
 
 
 def _collect_files(ext: str):
     ext = ext.lower()
     root = files(__name__)
 
-    def walk(trav, prefix=""):
+    def walk(trav):
         for p in trav.iterdir():
             if p.is_dir():
-                yield from walk(p, prefix + p.name + "/")
+                yield from walk(p)
             else:
                 name = p.name
                 if name.lower().endswith(ext):
                     stem = name[:-len(ext)]
                     if "_temp" not in stem:
-                        yield prefix + name
+                        yield Path(p).resolve()  # full path
 
     return sorted(set(walk(root)))
 
