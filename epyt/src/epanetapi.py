@@ -2,12 +2,12 @@ import os
 import sys
 import warnings
 from functools import partial
+from pathlib import Path
+
+from epyt import epyt_root
 
 from .epanet_cffi_compat import cdll, byref, create_string_buffer, c_uint64, c_void_p, c_int, c_double, c_float, c_long, \
-    c_char_p, funcptr_null
-
-from pathlib import Path
-from epyt import epyt_root
+    c_char_p, funcptr_null, EN_Project_p
 
 
 def _default_lib_path():
@@ -47,7 +47,7 @@ class epanetapi:
 
     EN_MAXID = 32  # Maximum length of ID names
 
-    def __init__(self, version=2.2, ph=False, loadlib=True, customlib=None):
+    def __init__(self, version=2.3, ph=False, loadlib=True, customlib=None):
         """Load the EPANET library.
 
         Parameters:
@@ -94,9 +94,8 @@ class epanetapi:
             self._closeQ = partial(self._lib.EN_closeQ, self._ph) if self._ph is not None else self._lib.ENcloseQ
             self._initQ = partial(self._lib.EN_initQ, self._ph) if self._ph is not None else self._lib.ENinitQ
 
-        if float(version) >= 2.2 and ph:
-            self._ph = c_uint64()
-            self._ph = self._ph.value
+        if ph:
+            self._ph = EN_Project_p()
 
     # Optional lazy accessor; loads on first use if loadlib=False
     @property
@@ -899,6 +898,7 @@ class epanetapi:
         self.binfile = bytes(binFile, 'utf-8')
         if self._ph is not None:
             self._lib.EN_createproject(byref(self._ph))
+            self._ph = self._ph.value
             self.errcode = self._lib.EN_openX(self._ph, self.inpfile, self.rptfile, self.binfile)
         else:
             self.errcode = self._lib.ENopenX(self.inpfile, self.rptfile, self.binfile)
@@ -1876,9 +1876,11 @@ class epanetapi:
         """
 
         if self._ph is not None:
-            self.errcode = self._lib.EN_init(self._ph, "", "", unitsType, headLossType)
+            self._lib.EN_createproject(byref(self._ph))
+            self._ph = self._ph.ptr[0]
+            self.errcode = self._lib.EN_init(self._ph, b"", b"", unitsType, headLossType)
         else:
-            self.errcode = self._lib.ENinit("", "", unitsType, headLossType)
+            self.errcode = self._lib.ENinit(b"", b"", unitsType, headLossType)
 
         self.ENgeterror()
 
