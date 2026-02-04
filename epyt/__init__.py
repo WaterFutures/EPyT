@@ -1,11 +1,17 @@
 # -*- coding: utf-8 -*-
 __author__ = """Marios S. Kyriakou"""
 __email__ = "kiriakou.marios@ucy.ac.cy"
-__version__ = "1.2.3"
+__version__ = "2.3.3.0"
 __msxversion__ = "200000"
-__lastupdate__ = "25/06/2025"
+__lastupdate__ = "04/02/2026"
 __copyright__ = """Copyright 2022, KIOS Research and Innovation Center of Excellence (KIOS CoE), 
 University of Cyprus (www.kios.org.cy)."""
 __license__ = "EUPL License, Version 1.2"
+
+try:
+    from importlib.resources import files  # Python 3.9+
+except ImportError:
+    from importlib_resources import files  # Backport for < 3.9
+epyt_root = str(files("epyt"))
 
 from epyt.epanet import epanet
