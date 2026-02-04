@@ -7,9 +7,10 @@
 from epyt import epanet
 
 # Initialize epanet without inputs
+# d = epanet(ph=True) or d = epanet()
 d = epanet()
 # d.InputFile = 'Example_1.inp' # CHECK if needed
-# Use gpm for flow units and the Hazen-Williams formula for head loss
+# Use GPM for flow units and the Hazen-Williams formula for head loss
 d.api.ENinit(d.ToolkitConstants.EN_GPM, d.ToolkitConstants.EN_HW)
 
 # Add the first junction node to the project with an 
