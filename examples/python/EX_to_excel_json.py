@@ -17,11 +17,11 @@
     
 """
 from epyt import epanet
-# Load network 
+
+# Load network
 d = epanet("Net1.inp")
 
-
-# Run complete analysis 
+# Run complete analysis
 comp_values = d.getComputedTimeSeries()
 
 # Display all values

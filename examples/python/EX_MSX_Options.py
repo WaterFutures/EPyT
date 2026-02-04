@@ -1,8 +1,10 @@
 from epyt import epanet, networks
-import os
 
-d = epanet('example.inp')
-d.loadMSXFile('example.msx')
+# Load example network
+nets = networks.inp_files()
+msx_nets = networks.msx_files()
+d = epanet(nets.example)  # example.inp
+d.loadMSXFile(msx_nets.example)  # example.msx
 
 a = d.getMSXOptions()
 # AREA_UNITS FT2/M2/CM2
@@ -71,3 +73,5 @@ d.printv(d.getMSXRateUnits())
 
 d.setMSXRateUnitsDAY()
 d.printv(d.getMSXRateUnits())
+
+print(d.MSXTempFile)
