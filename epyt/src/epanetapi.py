@@ -1877,7 +1877,10 @@ class epanetapi:
 
         if self._ph is not None:
             self._lib.EN_createproject(byref(self._ph))
-            self._ph = self._ph.ptr[0]
+            try:
+                self._ph = self._ph.ptr[0]
+            except:
+                pass
             self.errcode = self._lib.EN_init(self._ph, b"", b"", unitsType, headLossType)
         else:
             self.errcode = self._lib.ENinit(b"", b"", unitsType, headLossType)

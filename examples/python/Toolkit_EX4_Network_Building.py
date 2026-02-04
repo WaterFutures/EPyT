@@ -15,7 +15,7 @@ from epyt import epanet
 
 # Create an empty INP file
 testinp = 'TESTING.inp'
-d = epanet(testinp, 'CREATE', ph=True)
+d = epanet(testinp, createinp=True, ph=True)
 
 # Initialize epanet flow units 
 d.initializeEPANET(d.ToolkitConstants.EN_GPM, d.ToolkitConstants.EN_HW)

@@ -410,8 +410,8 @@ class epanet:
             d = epanet(inpname, msx=True,customlib=epanetlib)
      """
 
-    def __init__(self, *argv, version=2.2, ph=False, loadfile=False, customlib=None, display_msg=True,
-                 display_warnings=True):
+    def __init__(self, *argv, version=2.3, ph=False, loadfile=False, customlib=None, display_msg=True,
+                 display_warnings=True, createinp=False):
         # Constants
         self.msx = None
         if display_warnings:
@@ -433,7 +433,7 @@ class epanet:
         if self.display_msg and self.customlib is None:
             print(f'EPANET version {self.getVersion()} '
                   f'loaded (EPyT version v{self.classversion} - Last Update: {__lastupdate__}).')
-            print('Publication DOI: https://zenodo.org/records/18484878');
+            print('Publication DOI: https://zenodo.org/records/18484878')
 
         # ToolkitConstants: Contains all parameters from epanet2_2.h
         self.ToolkitConstants = EpanetConstants()
@@ -461,6 +461,14 @@ class epanet:
                 if fullpath:
                     p = Path(fullpath)
                     self.InputFile = str(p)
+                elif createinp:
+                    self.InputFile = argv[0]
+                    # if the file exists it is overwritten
+                    f = open(self.InputFile, "w")
+                    f.close()
+                    self.createProject()
+                    # Save the temporary input file
+                    self.TempInpFile = f'{self.InputFile[0:-4]}_temp.inp'
                 else:
                     warnings.warn(f'File "{self.InputFile}" does not exist in "{epyt_root}".')
                     sys.exit(1)
@@ -480,24 +488,14 @@ class epanet:
             else:
                 self.api.ENopen(self.TempInpFile, self.RptTempfile, self.BinTempfile)
 
-            if (self.api.errcode >= 200 and self.api.errcode < 300):
+            if self.api.errcode >= 200 and self.api.errcode < 300:
                 self.api.ENclose()  # close the file and fetch report contents
                 with open(self.RptTempfile, "r") as f:
                     print(f.read())
                 self.api.ENopenX(self.TempInpFile, self.RptTempfile, self.BinTempfile)
 
-            if not loadfile:
+            if not loadfile and not createinp:
                 self.__getInitParams()
-
-            elif (len(argv) == 2) and (argv[1].upper() == 'CREATE'):
-                self.InputFile = argv[0]
-                # if the file exists it is overwritten
-                f = open(self.InputFile, "w")
-                f.close()
-                self.createProject()
-                # Save the temporary input file
-                self.BinTempfile = f'{self.InputFile[0:-4]}_temp.inp'
-                self.__exist_inp_file = True
 
             if not self.__exist_inp_file:
                 msg = f'File "{self.InputFile}" does not exist.'
