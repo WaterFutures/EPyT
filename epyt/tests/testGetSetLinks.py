@@ -129,7 +129,7 @@ d.printv(d.getLinkWallReactionCoeff(2))
 
 linkset = d.getLinkInitialSetting()
 if d.getLinkValveCount():
-    linkset[d.getLinkValveIndex()-1] = 0
+    linkset[d.getLinkValveIndex() - 1] = 0
 d.setLinkInitialSetting(linkset * 10)
 d.printv(d.getLinkInitialSetting())
 d.printv(d.getLinkInitialSetting(2))

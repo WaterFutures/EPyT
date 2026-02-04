@@ -6,7 +6,7 @@ Step-by-step execution. You may also use breakpoints.
 from epyt import epanet
 
 # Create EPANET object using the INP file
-d = epanet('Net1.inp')  # Net1 Net2 Net3 BWSN_Network_1 L-TOWN ky1 -10
+d = epanet('Net1.inp')  # Net1 Net2 Net3 BWSN_Network_1 L-TOWN ky10
 
 # Print properties
 d.printv(dir(d))
@@ -258,7 +258,6 @@ d.printv(d.getNodeNameID(junctionIndex))  # Retrieves the ID labels of all junct
 d.printv(d.getNodePatternIndex())  # Retrieves the value of all node demand pattern indices
 d.printv(d.getNodePatternIndex(1))  # Retrieves the value of the first node demand pattern index
 d.printv(d.getNodePatternIndex([1, 2, 3]))  # Retrieves the value of the 1,2,3 nodes demand pattern index
-
 
 # Get node type (junction, reservoir, tank)/ index type
 d.printv(d.getNodeType())  # Retrieves the node-type code for all nodes

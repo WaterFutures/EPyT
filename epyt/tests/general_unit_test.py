@@ -1,7 +1,8 @@
-from math import isclose
-from epyt import epanet
-import numpy as np
 import unittest
+from math import isclose
+
+import numpy as np
+from epyt import epanet
 
 
 class AddTest(unittest.TestCase):
@@ -361,6 +362,7 @@ class DeleteTest(unittest.TestCase):
         d.deleteRules([1, 2, 3])  # Deletes the 1st to 3rd rule-based control
         self.assertEqual(d.getRuleCount(), 1, err_msg)
 
+
 class GetTest(unittest.TestCase):
 
     def setUp(self):
@@ -661,7 +663,8 @@ class GetTest(unittest.TestCase):
         # Test 7
         self.assertEqual(curves_info.CurveNvalue[0], 8, err_msg)
         # Test 8
-        np.testing.assert_array_almost_equal(curves_info.CurveXvalue[1], [0.0, 2.78, 5.56, 8.53, 11.11, 13.89], decimal=2)
+        np.testing.assert_array_almost_equal(curves_info.CurveXvalue[1], [0.0, 2.78, 5.56, 8.53, 11.11, 13.89],
+                                             decimal=2)
         # Test 9
         self.assertEqual(curves_info.CurveYvalue[1], [88.0, 87.0, 84.0, 76.0, 63.0, 47.0], err_msg)
 
@@ -688,6 +691,7 @@ class GetTest(unittest.TestCase):
         point_index = 1
         np.testing.assert_array_almost_equal(d.getCurveValue(curve_index, point_index), np.array([0., 38.]),
                                              err_msg=err_msg)
+
     def test_getDemandModel(self):
         self.assertDictEqual(self.epanetClass.getDemandModel().to_dict(),
                              {'DemandModelCode': 0, 'DemandModelPmin': 0.0, 'DemandModelPreq': 0.10000000149011612,
@@ -787,7 +791,7 @@ class GetTest(unittest.TestCase):
         power = 10
         pattern_index = 1
         pump_index = d.addLinkPump(pump_id, from_node, to_node, initial_status, initial_setting, power,
-                                                  pattern_index)
+                                   pattern_index)
         err_msg = 'Wrong Pump Pattern Index'
         # Test 8
         self.assertEqual(list(d.getLinkPumpPatternIndex()), [0, 0, 0, 0, 0, 0, 0, 1], err_msg)
@@ -811,8 +815,8 @@ class GetTest(unittest.TestCase):
         """ ---getLinkPumpType---    """
         err_msg = 'Wrong Pump Type'
         # Test 12
-        self.assertEqual(d.getLinkPumpType(), ['NO_CURVE', 'NO_CURVE', 'NO_CURVE', 'NO_CURVE', 'NO_CURVE', 'NO_CURVE',
-                                               'NO_CURVE', 'CONSTANT_HORSEPOWER'],
+        self.assertEqual(d.getLinkPumpType(), ['CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM',
+                                               'CUSTOM', 'CONSTANT_HORSEPOWER'],
                          err_msg)
 
         """ ---getLinkPumpTypeCode---    """
@@ -820,10 +824,10 @@ class GetTest(unittest.TestCase):
         d.unload()
         # Test 13
         d = epanet('Richmond_skeleton.inp', ph=False)
-        self.assertEqual(d.getLinkPumpTypeCode(), [3, 3, 3, 3, 3, 3, 3], err_msg)
+        self.assertEqual(d.getLinkPumpTypeCode(), [2, 2, 2, 2, 2, 2, 2], err_msg)
         self.epanetClass.unload()
         self.epanetClass = epanet('Net1.inp', ph=False)
-        self.assertEqual(self.epanetClass.getLinkPumpTypeCode(), [3], err_msg)
+        self.assertEqual(self.epanetClass.getLinkPumpTypeCode(), [2], err_msg)
 
     def test_getLinksInfo(self):
         # Desired data
@@ -947,12 +951,10 @@ class GetTest(unittest.TestCase):
 
         """ ---getNodeDemandDeficit---    """  # Check again for inconsistent output, dynamic might be the case,
         # getComputedHydraulicTimeSeries.DemandDeficit works fine
-        self.epanetClass.setDemandModel('PDA', 0, 0.1, 0.5)
+        self.epanetClass.setDemandModel('PDA', 10, 400, 1.5)
         actual_def = self.epanetClass.getComputedHydraulicTimeSeries().DemandDeficit[0]
-        desired_dem_def = [0.0, -0.00012342832044413999, -0.00012111212332749546, -0.00012281893931302976,
-                           -0.00012177492556971789,
-                           -0.00012291126064630734, -0.00012496099800993576, -0.00011990998540248189,
-                           -0.00011465764024330798, 0.0, 0.0]
+        desired_dem_def = [0., 127.21632385, 128.40765381, 85.14452362, 127.31324768,
+                           170.04138184, 126.89976501, 84.98687744, 86.15339661, 0., 0.]
         np.testing.assert_array_almost_equal(list(actual_def), desired_dem_def, decimal=5)
 
         """ ---getNodeDemandPatternIndex---    """
@@ -1066,7 +1068,8 @@ class GetTest(unittest.TestCase):
         self.assertEqual(d.getNodeTankNameID(),
                          ['T-1', 'T-10', 'T-11', 'T-12', 'T-13', 'T-2', 'T-3', 'T-4', 'T-5', 'T-6', 'T-7', 'T-8',
                           'T-9'], err_msg)
-        np.testing.assert_array_almost_equal(t_data['Elevation'], desired_tdata['Elevation'], err_msg=err_msg, decimal=4)
+        np.testing.assert_array_almost_equal(t_data['Elevation'], desired_tdata['Elevation'], err_msg=err_msg,
+                                             decimal=4)
         np.testing.assert_array_almost_equal(t_data['Initial_Level'], desired_tdata['Initial_Level'], err_msg=err_msg,
                                              decimal=3)
         np.testing.assert_array_almost_equal(t_data['Minimum_Water_Level'], desired_tdata['Minimum_Water_Level'],
@@ -1214,7 +1217,8 @@ class GetTest(unittest.TestCase):
                                      4.421e+02, 2.342e+02, 2.630e+01, 4.720e+01, 6.800e+01, 3.522e+02,
                                      6.364e+02, 3.312e+02, 2.600e+01, 2.610e+01, 2.610e+01, 2.247e+02]])
         actual_pattern = d.getPattern()
-        np.testing.assert_array_almost_equal(actual_pattern, desired_pattern, err_msg='Wrong Patterns Output', decimal=4)
+        np.testing.assert_array_almost_equal(actual_pattern, desired_pattern, err_msg='Wrong Patterns Output',
+                                             decimal=4)
 
         """ ---getPatternAverageValue---    """
         desired_pat_avg_val = [0.8856250000000001, 33.333333333333336, 0.967291666666667, 209.6072916666666]

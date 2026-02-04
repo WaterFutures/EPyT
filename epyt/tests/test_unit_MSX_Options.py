@@ -1,6 +1,7 @@
-from epyt import epanet, networks
-import unittest
 import os
+import unittest
+
+from epyt import epanet, networks
 
 DIRNAME = os.path.dirname(networks.__file__)
 
@@ -72,15 +73,15 @@ class MSXtest(unittest.TestCase):
         self.assertEqual(self.epanetClass.getMSXCoupling(),
                          "NONE", "Wrong get Coupling comments output")
 
-        #self.epanetClass.setMSXCompilerVC()
-        #self.assertEqual(self.epanetClass.getMSXCompiler(),
-        #                 "VC", "Wrong get Compiler comments output")
-        #self.epanetClass.setMSXCompilerGC()
-        #self.assertEqual(self.epanetClass.getMSXCompiler(),
-        #                 "GC", "Wrong get Compiler comments output")
-        #self.epanetClass.setMSXCompilerNONE()
-        #self.assertEqual(self.epanetClass.getMSXCompiler(),
-        #                 "NONE", "Wrong get Compiler comments output")
+        self.epanetClass.setMSXCompilerVC()
+        self.assertEqual(self.epanetClass.getMSXCompiler(),
+                        "VC", "Wrong get Compiler comments output")
+        self.epanetClass.setMSXCompilerGC()
+        self.assertEqual(self.epanetClass.getMSXCompiler(),
+                        "GC", "Wrong get Compiler comments output")
+        self.epanetClass.setMSXCompilerNONE()
+        self.assertEqual(self.epanetClass.getMSXCompiler(),
+                        "NONE", "Wrong get Compiler comments output")
 
         self.epanetClass.setMSXAtol(0.2)
         self.assertEqual(self.epanetClass.getMSXAtol(),

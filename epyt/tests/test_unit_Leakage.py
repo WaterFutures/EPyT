@@ -1,25 +1,18 @@
-import unittest
 import math
+import unittest
+
 from epyt import epanet
+
 
 class TestLeakage(unittest.TestCase):
 
     def test_leakage_model(self):
-        error = 0
-        Pipe21, Junc21, Junc22 = None, None, None
-        pipe21Leak, junc21Leak, junc22Leak = 0.0, 0.0, 0.0
-        ph = None
 
         # Create class and open network
         d = epanet("Net1.inp")
 
         # Single period analysis
-        EN_DURATION = 0
-        EN_LEAK_AREA = 26
-        EN_LEAK_EXPAN = 27
-        EN_LINK_LEAKAGE = 28
-        EN_LEAKAGEFLOW = 30
-        error = d.api.ENsettimeparam(EN_DURATION, 0)
+        error = d.api.ENsettimeparam(d.ToolkitConstants.EN_DURATION, 0)
         self.assertEqual(error, 0)
 
         # Get index of Pipe 21
@@ -28,9 +21,9 @@ class TestLeakage(unittest.TestCase):
 
         # Set Pipe21 leak area to 1.0 sq mm per 100 ft of pipe
         # and its expansion rate to 0.1 sq mm per ft of head
-        error = d.api.ENsetlinkvalue(Pipe21, EN_LEAK_AREA, 1.0)
+        error = d.api.ENsetlinkvalue(Pipe21, d.ToolkitConstants.EN_LEAK_AREA, 1.0)
         self.assertEqual(error, 0)
-        error = d.api.ENsetlinkvalue(Pipe21, EN_LEAK_EXPAN, 0.1)
+        error = d.api.ENsetlinkvalue(Pipe21, d.ToolkitConstants.EN_LEAK_EXPAN, 0.1)
         self.assertEqual(error, 0)
 
         # Solve for hydraulics
@@ -38,7 +31,7 @@ class TestLeakage(unittest.TestCase):
         self.assertEqual(error, 0)
 
         # Compute Pipe 21 leakage flow using the FAVAD formula EN_LINK_LEAKAGE
-        pipe21Leak = d.api.ENgetlinkvalue(Pipe21, EN_LINK_LEAKAGE)
+        pipe21Leak = d.api.ENgetlinkvalue(Pipe21, d.ToolkitConstants.EN_LINK_LEAKAGE)
         self.assertEqual(d.api.errcode, 0)
 
         # Retrieve leakage flow at end nodes
@@ -47,21 +40,22 @@ class TestLeakage(unittest.TestCase):
         Junc22 = d.api.ENgetnodeindex('22')
         self.assertEqual(d.api.errcode, 0)
 
-        junc21Leak = d.api.ENgetnodevalue(Junc21, EN_LEAKAGEFLOW)
+        junc21Leak = d.api.ENgetnodevalue(Junc21, d.ToolkitConstants.EN_LEAKAGEFLOW)
         self.assertEqual(d.api.errcode, 0)
-        junc22Leak = d.api.ENgetnodevalue(Junc22, EN_LEAKAGEFLOW)
+        junc22Leak = d.api.ENgetnodevalue(Junc22, d.ToolkitConstants.EN_LEAKAGEFLOW)
         self.assertEqual(d.api.errcode, 0)
         d.solveCompleteHydraulics()
 
-        #print(pipe21Leak)
-        #print(junc21Leak)
-        #print(junc22Leak)
+        # print(pipe21Leak)
+        # print(junc21Leak)
+        # print(junc22Leak)
         # Check that the sum of the node leakages equals the pipe leakage
         self.assertTrue(abs(pipe21Leak - (junc21Leak + junc22Leak)) < 0.01)
 
         # Clean up
         error = d.api.ENclose()
         self.assertEqual(d.api.errcode, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

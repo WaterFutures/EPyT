@@ -131,7 +131,7 @@ d.printv(Q)
 
 # Set nodes info
 d.printv(d.getNodeElevations())
-d.printv(d.setNodeElevations(2*d.getNodeElevations()))
+d.printv(d.setNodeElevations(2 * d.getNodeElevations()))
 d.printv(d.getNodeElevations())
 d.printv(d.getNodeElevations(2))
 d.setNodeElevations(2, 300)  # index,  value
@@ -145,7 +145,7 @@ d.setNodeEmitterCoeff(2, 1.5)  # index,  value
 d.printv(d.getNodeEmitterCoeff(2))
 
 d.printv(d.getNodeInitialQuality())
-d.setNodeInitialQuality(2*d.getNodeInitialQuality())
+d.setNodeInitialQuality(2 * d.getNodeInitialQuality())
 d.printv(d.getNodeInitialQuality())
 d.printv(d.getNodeInitialQuality(2))
 d.setNodeInitialQuality(2, 1.5)  # index,  value
@@ -175,16 +175,16 @@ d.setNodeSourcePatternIndex(1, 1)
 d.printv(d.getNodeSourcePatternIndex())
 
 d.printv(d.getNodeSourceQuality())
-d.setNodeSourceQuality(2*d.getNodeSourceQuality())
+d.setNodeSourceQuality(2 * d.getNodeSourceQuality())
 d.printv(d.getNodeSourceQuality())
 d.setNodeSourceQuality(3, 20)
 d.printv(d.getNodeSourceQuality())
 
 # Set tanks info
 d.printv(d.getNodeTankInitialLevel())
-d.setNodeTankInitialLevel(d.getNodeTankInitialLevel()+20)
+d.setNodeTankInitialLevel(d.getNodeTankInitialLevel() + 20)
 v = d.getNodeTankInitialLevel()
-d.setNodeTankInitialLevel(tankInd, v+10)
+d.setNodeTankInitialLevel(tankInd, v + 10)
 d.printv(d.getNodeTankInitialLevel())
 
 d.printv(d.getNodeTankDiameter())
