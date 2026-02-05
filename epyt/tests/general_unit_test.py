@@ -2,14 +2,15 @@ import unittest
 from math import isclose
 
 import numpy as np
-from epyt import epanet
+
+from epyt import epanet, networks
 
 
 class AddTest(unittest.TestCase):
     def setUp(self):
         """Call before every test case."""
         # Create EPANET object using the INP file
-        inp_name = 'Net1.inp'
+        inp_name = networks.inp_files().Net1
         self.epanetClass = epanet(inp_name, ph=False)
 
     def tearDown(self):
