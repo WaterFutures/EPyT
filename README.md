@@ -32,6 +32,7 @@ For support, please use the OWA community forum: https://github.com/orgs/OpenWat
 - [List of Python Class Functions](#list-of-python-class-functions)
 - [List of MSX Functions](#list-of-msx-functions)
 - [List of EPANET 2.2 Functions](#list-of-epanet-22-functions)
+- [List of EPANET 2.3 Functions](#list-of-epanet-23-functions)
 - [List of EPANET MSX Functions API](#list-of-epanet-msx-functions-api)
 ## How to cite 
 
