@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-from functools import lru_cache
-from threading import RLock
 import re
 import sys
-from cffi import FFI
+from functools import lru_cache
 from pathlib import Path
+from threading import RLock
+
+from cffi import FFI
 
 ffi = FFI()
 
@@ -78,10 +79,12 @@ _FUNC_RE = re.compile(
     re.VERBOSE | re.DOTALL,
 )
 
+
 def _apply_type_aliases(text: str) -> str:
     for token, ctype in _TYPE_ALIASES.items():
         text = re.sub(rf"\b{re.escape(token)}\b", ctype, text)
     return text
+
 
 def _load_decls_from_header(header_path: str = None) -> str:
     # Accept a single header path or use both defaults
@@ -125,7 +128,9 @@ def _load_decls_from_header(header_path: str = None) -> str:
 
     return "\n".join(uniq) + ("\n" if uniq else "")
 
+
 _CDEF_DECLS = None
+
 
 def _ensure_cdef(header_path: str = None):
     global _CDEF_DONE, _CDEF_DECLS
@@ -159,67 +164,86 @@ def _ensure_cdef(header_path: str = None):
 # ---------------------------------------------
 class _Ptr:
     __slots__ = ("c_type", "ptr")
+
     def __init__(self, c_type: str):
         self.c_type = c_type
         self.ptr = ffi.new(f"{c_type} *")
+
     @property
     def value(self):
         return self.ptr[0]
+
     @value.setter
     def value(self, v):
         self.ptr[0] = v
 
+
 class _Handle:
     __slots__ = ("ptr",)
+
     def __init__(self):
         self.ptr = ffi.new("void *[1]", [ffi.NULL])
+
     @property
     def value(self):
         return self.ptr[0]
+
     @value.setter
     def value(self, v):
         if isinstance(v, int):
             self.ptr[0] = ffi.cast("void *", v)
         else:
             self.ptr[0] = v
+
     @property
     def as_voidp(self):
         return self.ptr[0]
 
+
 class _CVoidP:
     __slots__ = ("ptr",)
+
     def __init__(self, value=None):
         if value is None:
             value = ffi.NULL
         elif isinstance(value, int):
             value = ffi.cast("void *", value)
         self.ptr = ffi.new("void *[1]", [value])
+
     @property
     def value(self):
         return self.ptr[0]
+
     @value.setter
     def value(self, v):
         if isinstance(v, int):
             v = ffi.cast("void *", v)
         self.ptr[0] = v
 
+
 class _CVoidPType:
     __slots__ = ()
+
     def __call__(self, value=None):
         return _CVoidP(value)
+
 
 # Factory to create a mutable void* holder
 c_void_p = _CVoidPType()
 
+
 class _Buffer:
     __slots__ = ("ptr", "n")
+
     def __init__(self, n: int):
         n = int(n)
         self.n = n
         self.ptr = ffi.new(f"char[{n}]")
+
     @property
     def value(self) -> bytes:
         return ffi.string(self.ptr)
+
     @value.setter
     def value(self, b):
         if not isinstance(b, (bytes, bytearray)):
@@ -232,11 +256,40 @@ class _Buffer:
         ffi.memmove(self.ptr, b, n)
         self.ptr[n] = 0
 
+
+class _ENProjectPtr:
+    __slots__ = ("ptr",)
+
+    def __init__(self):
+        # EN_Project is typedef void *EN_Project;
+        # EN_Project *ph -> pointer to that handle
+        self.ptr = ffi.new("EN_Project *")
+
+    @property
+    def value(self):
+        return self.ptr[0]
+
+    @value.setter
+    def value(self, v):
+        if isinstance(v, int):
+            v = ffi.cast("EN_Project", v)
+        self.ptr[0] = v
+
+
+class _ENProjectPtrType:
+    __slots__ = ()
+
+    def __call__(self):
+        return _ENProjectPtr()
+
+
 class _ArrayFactory:
     __slots__ = ("ctype", "n")
+
     def __init__(self, ctype: str, n: int):
         self.ctype = ctype
         self.n = int(n)
+
     def __call__(self, *vals):
         if vals:
             if len(vals) == 1 and hasattr(vals[0], "__iter__"):
@@ -244,35 +297,46 @@ class _ArrayFactory:
             return ffi.new(f"{self.ctype}[{self.n}]", list(vals))
         return ffi.new(f"{self.ctype}[{self.n}]")
 
+
 class _CScalarType:
     __slots__ = ("ctype", "pycast")
+
     def __init__(self, ctype: str, pycast):
         self.ctype = ctype
         self.pycast = pycast
+
     def __call__(self, value=None):
         if value is None:
             return _Ptr(self.ctype)
         return self.pycast(value)
+
     def __mul__(self, n):
         return _ArrayFactory(self.ctype, n)
 
+
+EN_Project_p = _ENProjectPtrType()
 c_int = _CScalarType("int", int)
 c_long = _CScalarType("long", int)
 c_float = _CScalarType("float", float)
 c_double = _CScalarType("double", float)
 
+
 class _CUInt64Type:
     __slots__ = ()
+
     def __call__(self, value=None):
         if value is None:
             return _Handle()
         return int(value)
 
+
 c_uint64 = _CUInt64Type()
+
 
 @lru_cache(maxsize=4096)
 def _cstr_cached(b: bytes):
     return ffi.new("char[]", b)
+
 
 def c_char_p(b, *, intern: bool = True):
     if b is None:
@@ -285,8 +349,10 @@ def c_char_p(b, *, intern: bool = True):
         return _cstr_cached(b)
     return ffi.new("char[]", b)
 
+
 def void_p_null():
     return _C_VOIDP_NULL
+
 
 # ---------------------- function-pointer helpers ------------------------
 def _normalize_funcptr_signature(signature: str) -> str:
@@ -298,23 +364,31 @@ def _normalize_funcptr_signature(signature: str) -> str:
         s = f"{ret} (* ){args}"
     return s
 
+
 def funcptr_null(signature: str):
     sig = _normalize_funcptr_signature(signature)
     return ffi.cast(sig, 0)
 
+
 def make_callback(signature: str, pyfunc):
     return ffi.callback(signature)(pyfunc)
+
 
 def create_string_buffer(n: int):
     return _Buffer(n)
 
+
 def byref(obj):
-    if isinstance(obj, (_Ptr, _Buffer)):
+    if isinstance(obj, (_Ptr, _Buffer, _Handle, _CVoidP)):
+        return obj.ptr
+    if hasattr(obj, "ptr"):
         return obj.ptr
     return obj
 
+
 class _LibProxy:
     __slots__ = ("_lib", "_cache")
+
     def __init__(self, libpath: str, header_path: str = None):
         _ensure_cdef(header_path)
         self._lib = ffi.dlopen(libpath, flags=getattr(ffi, "RTLD_NOW", 0))
@@ -348,17 +422,19 @@ class _LibProxy:
         for alt in alt_names:
             try:
                 cfunc = getattr(self._lib, alt)
-                cache[name] = cfunc   # cache under the originally requested name
+                cache[name] = cfunc  # cache under the originally requested name
                 return cfunc
             except AttributeError:
                 continue
 
         raise AttributeError(name)
 
+
 class cdll:
     @staticmethod
     def LoadLibrary(path: str, *, header_path: str = None):
         return _LibProxy(path, header_path=header_path)
+
 
 __all__ = [
     "ffi",
@@ -368,6 +444,7 @@ __all__ = [
     "cdll", "_load_decls_from_header", "get_cdef_decls",
     "c_void_p",
 ]
+
 
 def get_cdef_decls():
     _ensure_cdef()
