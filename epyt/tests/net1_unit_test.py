@@ -1,13 +1,15 @@
-from epyt import epanet
-import numpy as np
 import unittest
+
+import numpy as np
+
+from epyt import epanet, networks
 
 
 class TestGetSetLinksCase(unittest.TestCase):
     def setUp(self):
         """Call before every test case."""
         # Create EPANET object using the INP file
-        inp_name = 'Net1.inp'
+        inp_name = networks.inp_files().Net1
         self.epanetClass = epanet(inp_name, ph=False)
 
     def tearDown(self):
@@ -202,9 +204,9 @@ class TestGetSetLinksCase(unittest.TestCase):
              2.637534635141492e-11,
              2.5352164811920375e-11, 20.08353269330769, 19.945617762391066,
              19.61450487894149])
-        np.testing.assert_array_almost_equal(head_loss, h_desired,  decimal=3, err_msg="Wrong HeadLoss output")
+        np.testing.assert_array_almost_equal(head_loss, h_desired, decimal=3, err_msg="Wrong HeadLoss output")
         f_desired = [np.array(1866.17578125), np.array(1848.58117676), np.array(1837.46105957)]
-        np.testing.assert_array_almost_equal(flow[0:3], f_desired,  decimal=3, err_msg="Wrong Flows output")
+        np.testing.assert_array_almost_equal(flow[0:3], f_desired, decimal=3, err_msg="Wrong Flows output")
 
     """ ------------------------------------------------------------------------- """
 
@@ -289,6 +291,7 @@ class TestGetSetLinksCase(unittest.TestCase):
     def testSetLinkMinorLossCoefficientIndex(self):
         self.epanetClass.setLinkMinorLossCoeff(2, 1.01)  # index,  value
         assert np.isclose(self.epanetClass.getLinkMinorLossCoeff(2), 1.01, atol=1e-6), "Wrong set minor loss output"
+
     """ ------------------------------------------------------------------------- """
 
     def testSetLinkInitialStatusAll(self):

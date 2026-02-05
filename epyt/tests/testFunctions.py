@@ -2,11 +2,13 @@
 EPANET Python Toolkit (EPyT) Test Part 1
 This file is provided to ensure that all functions can be executed correctly.
 Step-by-step execution. You may also use breakpoints.
-"""
-from epyt import epanet
+# """
+from pathlib import Path
+
+from epyt import epanet, networks
 
 # Create EPANET object using the INP file
-inpname = "Net1.inp"
+inpname = networks.inp_files().Net1
 d = epanet(inpname)  # Net1 Net2 Net3 BWSN_Network_1 ky1 -10
 
 # %% Get/Set Functions
@@ -24,13 +26,13 @@ d.printv(d.getCurveNameID())
 d.printv(d.getCurveValue(indexCurve))  # returns all points for specific curve index
 d.printv(d.getCurveValue(indexCurve, 2))  # returns specific point for specific curve index
 
-d.setCurve(3, [[1400, 200], [1900, 300]])  # Change an existing curve
+d.setCurve(2, [[1400, 200], [1900, 300]])  # Change an existing curve
 d.printv(d.getCurveValue(indexCurve))
 
 d.printv(d.getCurvesInfo().to_dict())
 
 d.printv(d.getCurveLengths())
-d.printv(d.getCurveLengths(3))
+d.printv(d.getCurveLengths(2))
 d.printv(d.getCurveLengths('NewCur2'))
 
 d.printv(d.getCurveIndex())
@@ -499,7 +501,6 @@ d.printv(d.getTimeRuleControlStep())
 
 d.printv(d.getPattern())
 
-
 d.setPattern(1, d.arange(1, 2, 0.1))
 
 d.printv(d.getPattern())
@@ -598,7 +599,7 @@ d.setReport('F-FACTOR YES')
 
 # Write the report to file 
 d.writeReport()
-report_file_string_1 = open('TestReport1.txt').read()  # create str varible
+report_file_string_1 = Path('TestReport1.txt').read_text(encoding='cp1253')
 
 d.setReportFormatReset()
 d.setReport('FILE TestReport2.txt')
@@ -609,20 +610,20 @@ d.setReport('DEMAND NO')
 d.setReport('PRESSURE NO')
 d.setReport('QUALITY NO')
 d.writeReport()
-report_file_string_2 = open('TestReport2.txt').read()  # create str varible
+report_file_string_2 = Path('TestReport2.txt').read_text(encoding='cp1253')
 
 d.setReportFormatReset()
 d.setReport('FILE TestReport3.txt')
 d.setReport('NODES ALL')
 d.setReport('LINKS ALL')
 d.writeReport()
-report_file_string_3 = open('TestReport3.txt').read()  # create str varible
+report_file_string_3 = Path('TestReport3.txt').read_text(encoding='cp1253')
 
 d.setReportFormatReset()
 d.setReport('FILE TestReport4.txt')
 d.setReport('STATUS YES')  # is not appear - check
 d.writeReport()
-report_file_string_4 = open('TestReport4.txt').read()  # create str varible
+report_file_string_4 = Path('TestReport4.txt').read_text(encoding='cp1253')
 
 d.setReportFormatReset()
 d.setReport('FILE TestReport5.txt')
@@ -634,14 +635,14 @@ d.setReport('FLOW YES')
 d.setReport('HEADLOSS NO')
 d.setReport('VELOCITY NO')
 d.writeReport()
-report_file_string_5 = open('TestReport5.txt').read()  # create str varible
+report_file_string_5 = Path('TestReport5.txt').read_text(encoding='cp1253')
 
 d.setReportFormatReset()
 d.setReport('FILE TestReport6.txt')
 d.setTimeStatisticsType('MINIMUM')
 d.setReport('NODES ALL')
 d.writeReport()
-report_file_string_6 = open('TestReport6.txt').read()  # create str varible
+report_file_string_6 = Path('TestReport6.txt').read_text(encoding='cp1253')
 
 # CHECK
 d.setReportFormatReset()
@@ -649,7 +650,7 @@ d.setReport('FILE TestReport7.txt')
 d.setTimeStatisticsType('NONE')
 d.setReport('LINKS ALL')
 d.writeReport()
-report_file_string_7 = open('TestReport7.txt').read()  # create str varible
+report_file_string_7 = Path('TestReport7.txt').read_text(encoding='cp1253')
 
 # unload net
 d.unload()

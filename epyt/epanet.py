@@ -58,6 +58,7 @@
    implied. See the Licence for the specific language governing
    permissions and limitations under the Licence.
 """
+import glob
 import json
 import math
 import os
@@ -70,28 +71,37 @@ import subprocess
 import sys
 import traceback
 import warnings
-from ctypes import cdll, byref, create_string_buffer, c_uint64, c_void_p, c_int, c_double, c_float, c_long, \
-    c_char_p
+from contextlib import suppress
 from datetime import datetime, timezone
-
-try:
-    from importlib.resources import files  # Python 3.9+
-except ImportError:
-    from importlib_resources import files  # Backport for < 3.9
+from functools import partial, lru_cache
 from inspect import getmembers, isfunction, currentframe, getframeinfo
 from pathlib import Path
-from shutil import copyfile
-from types import SimpleNamespace
+from shutil import copy2
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from matplotlib import cm
+from .src.epanet_cffi_compat import cdll, byref, create_string_buffer, c_char_p
 
-epyt_root = str(files("epyt"))
+try:
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    from matplotlib import cm
+except ImportError:
+    warnings.warn("matplotlib is not installed. Plotting functions will not work.")
 
-from epyt import __version__, __msxversion__, __lastupdate__
+try:
+    import numpy as np
+except ImportError:
+    warnings.warn("numpy is not installed. Some functions will not work.")
+
+try:
+    import pandas as pd
+except ImportError:
+    warnings.warn("pandas is not installed. Excel functions will not work.")
+
+from epyt import __version__, __msxversion__, __lastupdate__, epyt_root
+from .src.epanetapi import epanetapi
+from .src.epanetmsxapi import epanetmsxapi
+from .src.epanetconstants import EpanetConstants
+from .src.epyt_enums import EpytEnums
 
 red = "\033[91m"
 reset = "\033[0m"
@@ -121,15 +131,15 @@ class error_handler:
             if "epanet.py" not in frame.filename:
                 print(f"{red}{frame.filename}, line {frame.lineno}: {frame.line.strip()}{reset}")
                 break
-    # dev 2.3
-    # def _flowUnitsCheck(self):
-    #     """Return metric type based on unit."""
-    #     flow_unit = self.getFlowUnits()
-    #     if flow_unit in self._psi_units:
-    #         return "PSI"
-    #     if flow_unit in self._kpa_units:
-    #         return "KPA AND METERS"
-    #     return "UNKNOWN"
+
+    def _flowUnitsCheck(self):
+        """Return metric type based on unit."""
+        flow_unit = self.getFlowUnits()
+        if flow_unit in self._psi_units:
+            return "PSI"
+        if flow_unit in self._kpa_units:
+            return "KPA AND METERS"
+        return "UNKNOWN"
 
     def __getattribute__(self, function_id):
         attr = super().__getattribute__(function_id)
@@ -150,254 +160,7 @@ class error_handler:
         return attr
 
 
-class ToolkitConstants:
-    # Limits on the size of character arrays used to store ID names
-    # and text messages.
-    def __init__(self):
-        pass
-
-    EN_MAXID = 31 + 1  # characters in ID name
-    EN_MAXMSG = 255  # characters in message text
-
-    # Node parameters
-    EN_ELEVATION = 0
-    EN_BASEDEMAND = 1
-    EN_PATTERN = 2
-    EN_EMITTER = 3
-    EN_INITQUAL = 4
-    EN_SOURCEQUAL = 5
-    EN_SOURCEPAT = 6
-    EN_SOURCETYPE = 7
-    EN_TANKLEVEL = 8
-    EN_DEMAND = 9
-    EN_HEAD = 10
-    EN_PRESSURE = 11
-    EN_QUALITY = 12
-    EN_SOURCEMASS = 13
-    EN_INITVOLUME = 14
-    EN_MIXMODEL = 15
-    EN_MIXZONEVOL = 16
-    EN_TANKDIAM = 17
-    EN_MINVOLUME = 18
-    EN_VOLCURVE = 19
-    EN_MINLEVEL = 20
-    EN_MAXLEVEL = 21
-    EN_MIXFRACTION = 22
-    EN_TANK_KBULK = 23
-    EN_TANKVOLUME = 24
-    EN_MAXVOLUME = 25
-    EN_CANOVERFLOW = 26
-    EN_DEMANDDEFICIT = 27
-
-    # Link parameters
-    EN_DIAMETER = 0
-    EN_LENGTH = 1
-    EN_ROUGHNESS = 2
-    EN_MINORLOSS = 3
-    EN_INITSTATUS = 4
-    EN_INITSETTING = 5
-    EN_KBULK = 6
-    EN_KWALL = 7
-    EN_FLOW = 8
-    EN_VELOCITY = 9
-    EN_HEADLOSS = 10
-    EN_STATUS = 11
-    EN_SETTING = 12
-    EN_ENERGY = 13
-    EN_LINKQUAL = 14
-    EN_LINKPATTERN = 15
-    EN_PUMP_STATE = 16
-    EN_PUMP_EFFIC = 17
-    EN_PUMP_POWER = 18
-    EN_PUMP_HCURVE = 19
-    EN_PUMP_ECURVE = 20
-    EN_PUMP_ECOST = 21
-    EN_PUMP_EPAT = 22
-
-    # Time parameters
-    EN_DURATION = 0
-    EN_HYDSTEP = 1
-    EN_QUALSTEP = 2
-    EN_PATTERNSTEP = 3
-    EN_PATTERNSTART = 4
-    EN_REPORTSTEP = 5
-    EN_REPORTSTART = 6
-    EN_RULESTEP = 7
-    EN_STATISTIC = 8
-    EN_PERIODS = 9
-    EN_STARTTIME = 10
-    EN_HTIME = 11
-    EN_QTIME = 12
-    EN_HALTFLAG = 13
-    EN_NEXTEVENT = 14
-    EN_NEXTEVENTTANK = 15
-
-    # Component counts
-    EN_NODECOUNT = 0
-    EN_TANKCOUNT = 1
-    EN_LINKCOUNT = 2
-    EN_PATCOUNT = 3
-    EN_CURVECOUNT = 4
-    EN_CONTROLCOUNT = 5
-    EN_RULECOUNT = 6
-
-    # Node types
-    EN_JUNCTION = 0
-    EN_RESERVOIR = 1
-    EN_TANK = 2
-
-    # Link types
-    EN_CVPIPE = 0
-    EN_PIPE = 1
-    EN_PUMP = 2
-    EN_PRV = 3
-    EN_PSV = 4
-    EN_PBV = 5
-    EN_FCV = 6
-    EN_TCV = 7
-    EN_GPV = 8
-
-    # Quality analysis types
-    EN_NONE = 0
-    EN_CHEM = 1
-    EN_AGE = 2
-    EN_TRACE = 3
-
-    # Source quality types
-    EN_CONCEN = 0
-    EN_MASS = 1
-    EN_SETPOINT = 2
-    EN_FLOWPACED = 3
-
-    # Flow units types
-    EN_CFS = 0
-    EN_GPM = 1
-    EN_MGD = 2
-    EN_IMGD = 3
-    EN_AFD = 4
-    EN_LPS = 5
-    EN_LPM = 6
-    EN_MLD = 7
-    EN_CMH = 8
-    EN_CMD = 9
-
-    # Option types
-    EN_TRIALS = 0
-    EN_ACCURACY = 1
-    EN_TOLERANCE = 2
-    EN_EMITEXPON = 3
-    EN_DEMANDMULT = 4
-    EN_HEADERROR = 5
-    EN_FLOWCHANGE = 6
-    EN_HEADLOSSFORM = 7
-    EN_GLOBALEFFIC = 8
-    EN_GLOBALPRICE = 9
-    EN_GLOBALPATTERN = 10
-    EN_DEMANDCHARGE = 11
-    EN_SP_GRAVITY = 12
-    EN_SP_VISCOS = 13
-    EN_UNBALANCED = 14
-    EN_CHECKFREQ = 15
-    EN_MAXCHECK = 16
-    EN_DAMPLIMIT = 17
-    EN_SP_DIFFUS = 18
-    EN_BULKORDER = 19
-    EN_WALLORDER = 20
-    EN_TANKORDER = 21
-    EN_CONCENLIMIT = 22
-
-    # Control types
-    EN_LOWLEVEL = 0
-    EN_HILEVEL = 1
-    EN_TIMER = 2
-    EN_TIMEOFDAY = 3
-
-    # Time statistic types
-    EN_AVERAGE = 1
-    EN_MINIMUM = 2
-    EN_MAXIMUM = 3
-    EN_RANGE = 4
-
-    # Tank mixing models
-    EN_MIX1 = 0
-    EN_MIX2 = 1
-    EN_FIFO = 2
-    EN_LIFO = 3
-
-    # Save-results-to-file flag
-    EN_NOSAVE = 0
-    EN_SAVE = 1
-    EN_INITFLOW = 10
-    EN_SAVE_AND_INIT = 11
-
-    # ObjectType
-    EN_NODE = 0
-    EN_LINK = 1
-    EN_TIMEPAT = 2
-    EN_CURVE = 3
-    EN_CONTROL = 4
-    EN_RULE = 5
-
-    # Head Loss Type
-    EN_HW = 0
-    EN_DW = 1
-    EN_CM = 2
-
-    # Network objects used in rule-based controls
-    EN_R_NODE = 6
-    EN_R_LINK = 7
-    EN_R_SYSTEM = 8
-
-    # Object variables used in rule-based controls.
-    EN_R_DEMAND = 0
-    EN_R_HEAD = 1
-    EN_R_GRADE = 2
-    EN_R_LEVEL = 3
-    EN_R_PRESSURE = 4
-    EN_R_FLOW = 5
-    EN_R_STATUS = 6
-    EN_R_SETTING = 7
-    EN_R_POWER = 8
-    EN_R_TIME = 9
-    EN_R_CLOCKTIME = 10
-    EN_R_FILLTIME = 11
-    EN_R_DRAINTIME = 12
-
-    # Analysis convergence statistics.
-    EN_ITERATIONS = 0
-    EN_RELATIVEERROR = 1
-    EN_MAXHEADERROR = 2
-    EN_MAXFLOWCHANGE = 3
-    EN_MASSBALANCE = 4
-    EN_DEFICIENTNODES = 5
-    EN_DEMANDREDUCTION = 6
-
-    # Link status codes used in rule-based controls
-    EN_R_IS_OPEN = 1
-    EN_R_IS_CLOSED = 2
-    EN_R_IS_ACTIVE = 3
-
-    # MSX Constants
-    MSX_NODE = 0
-    MSX_LINK = 1
-    MSX_TANK = 2
-    MSX_SPECIES = 3
-    MSX_TERM = 4
-    MSX_PARAMETER = 5
-    MSX_CONSTANT = 6
-    MSX_PATTERN = 7
-
-    MSX_BULK = 0
-    MSX_WALL = 1
-
-    MSX_NOSOURCE = -1
-    MSX_CONCEN = 0
-    MSX_MASS = 1
-    MSX_SETPOINT = 2
-    MSX_FLOWPACED = 3
-
-
-def safe_delete(file):
+def _safe_delete(file):
     if isinstance(file, list):
         for file_path in file:
             if os.path.exists(file_path):
@@ -638,7 +401,8 @@ def isList(var):
         return False
 
 
-class epanet(error_handler):
+# class epanet(error_handler): disabled for now
+class epanet:
     """ EPyt main functions class
 
     Example with custom library
@@ -646,8 +410,8 @@ class epanet(error_handler):
             d = epanet(inpname, msx=True,customlib=epanetlib)
      """
 
-    def __init__(self, *argv, version=2.2, ph=False, loadfile=False, customlib=None, display_msg=True,
-                 display_warnings=True):
+    def __init__(self, *argv, version=2.3, ph=False, loadfile=False, customlib=None, display_msg=True,
+                 display_warnings=True, createinp=False):
         # Constants
         self.msx = None
         if display_warnings:
@@ -657,59 +421,10 @@ class epanet(error_handler):
         self.customlib = customlib
         self.MSXFile = None
         self.MSXTempFile = None
-        self.DEMANDMODEL = ['DDA', 'PDA']
-        # Link types
-        self.TYPELINK = ['CVPIPE', 'PIPE', 'PUMP', 'PRV', 'PSV',
-                         'PBV', 'FCV', 'TCV', 'GPV']
-        # Constants for mixing models
-        self.TYPEMIXMODEL = ['MIX1', 'MIX2', 'FIFO', 'LIFO']
-        # Node types
-        self.TYPENODE = ['JUNCTION', 'RESERVOIR', 'TANK']
-        # Constants for pumps
-        self.TYPEPUMP = ['CONSTANT_HORSEPOWER', 'POWER_FUNCTION', 'CUSTOM']
-        # Link PUMP status
-        self.TYPEPUMPSTATE = ['XHEAD', '', 'CLOSED', 'OPEN', '', 'XFLOW']
-        # Constants for quality
-        self.TYPEQUALITY = ['NONE', 'CHEM', 'AGE', 'TRACE', 'MULTIS']
-        # Constants for sources
-        self.TYPESOURCE = ['CONCEN', 'MASS', 'SETPOINT', 'FLOWPACED']
-        # Constants for statistics
-        self.TYPESTATS = ['NONE', 'AVERAGE', 'MINIMUM', 'MAXIMUM', 'RANGE']
-        # Constants for control: 'LOWLEVEL', 'HILEVEL', 'TIMER', 'TIMEOFDAY'
-        self.TYPECONTROL = ['LOWLEVEL', 'HIGHLEVEL', 'TIMER', 'TIMEOFDAY']
-        # Constants for report: 'YES', 'NO', 'FULL'
-        self.TYPEREPORT = ['YES', 'NO', 'FULL']
-        # Link Status
-        self.TYPESTATUS = ['CLOSED', 'OPEN']
-        # Constants for pump curves: 'PUMP', 'EFFICIENCY', 'VOLUME', 'HEADLOSS'
-        self.TYPECURVE = ['VOLUME', 'PUMP', 'EFFICIENCY', 'HEADLOSS', 'GENERAL']
-        # Constants of headloss types: HW: Hazen-Williams,
-        # DW: Darcy-Weisbach, CM: Chezy-Manning
-        self.TYPEHEADLOSS = ['HW', 'DW', 'CM']
-        # Constants for units
-        self.TYPEUNITS = ['CFS', 'GPM', 'MGD', 'IMGD', 'AFD',
-                          'LPS', 'LPM', 'MLD', 'CMH', 'CMD']
-        # 0 = closed (max. head exceeded), 1 = temporarily closed,
-        # 2 = closed, 3 = open, 4 = active (partially open)
-        # 5 = open (max. flow exceeded), 6 = open (flow setting not met),
-        # 7 = open (pressure setting not met)
-        self.TYPEBINSTATUS = ['CLOSED (MAX. HEAD EXCEEDED)', 'TEMPORARILY CLOSED',
-                              'CLOSED', 'OPEN', 'ACTIVE(PARTIALY OPEN)',
-                              'OPEN (MAX. FLOW EXCEEDED',
-                              'OPEN (PRESSURE SETTING NOT MET)']
-        # Constants for rule-based controls: 'OPEN', 'CLOSED', 'ACTIVE'
-        self.RULESTATUS = ['OPEN', 'CLOSED', 'ACTIVE']
-        # Constants for rule-based controls: 'IF', 'AND', 'OR'
-        self.LOGOP = ['IF', 'AND', 'OR']
-        # Constants for rule-based controls: 'NODE','LINK','SYSTEM'
-        self.RULEOBJECT = ['NODE', 'LINK', 'SYSTEM']
-        # Constants for rule-based controls: 'DEMAND', 'HEAD', 'GRADE' etc.
-        self.RULEVARIABLE = ['DEMAND', 'HEAD', 'GRADE', 'LEVEL', 'PRESSURE', 'FLOW',
-                             'STATUS', 'SETTING', 'POWER', 'TIME',
-                             'CLOCKTIME', 'FILLTIME', 'DRAINTIME']
-        # Constants for rule-based controls: '=', '~=', '<=' etc.
-        self.RULEOPERATOR = ['=', '~=', '<=', '>=', '<', '>', 'IS',
-                             'NOT', 'BELOW', 'ABOVE']
+
+        # Enums
+        self.type_lists = EpytEnums()
+        self.__dict__.update(self.type_lists.as_dict())
 
         # Initial attributes
         self.classversion = __version__
@@ -718,54 +433,69 @@ class epanet(error_handler):
         if self.display_msg and self.customlib is None:
             print(f'EPANET version {self.getVersion()} '
                   f'loaded (EPyT version v{self.classversion} - Last Update: {__lastupdate__}).')
+            print('Publication DOI: https://zenodo.org/records/18484878')
 
         # ToolkitConstants: Contains all parameters from epanet2_2.h
-        self.ToolkitConstants = ToolkitConstants()
+        self.ToolkitConstants = EpanetConstants()
         self.api.solve = 0
 
         if len(argv) > 0:
             self.InputFile = argv[0]
 
             self.__exist_inp_file = False
-            if len(argv) == 1:
-                if not os.path.exists(self.InputFile):
-                    for root, dirs, files in os.walk(epyt_root):
-                        for name in files:
-                            if name.lower().endswith(".inp"):
-                                if name == self.InputFile:
-                                    self.InputFile = os.path.join(root, self.InputFile)
-                                    break
-                        else:
-                            continue
-                        break
-                self.__exist_inp_file = True
-                self.api.ENopen(self.InputFile)
-                # Save the temporary input file
-                self.TempInpFile = self.InputFile[0:-4] + '_temp.inp'
-                # Create a new INP file (Working Copy)
-                copyfile(self.InputFile, self.TempInpFile)
-                # self.saveInputFile(self.TempInpFile)
-                # Close input file
-                self.closeNetwork()
-                # Load temporary file
-                rptfile = self.InputFile[0:-4] + '_temp.txt'
-                binfile = self.InputFile[0:-4] + '_temp.bin'
-                self.RptTempfile = rptfile
-                self.BinTempfile = binfile
-                self.api.ENopen(self.TempInpFile, rptfile, binfile)
-                # Parameters
-                if not loadfile:
-                    self.__getInitParams()
+            p = Path(self.InputFile)
 
-            elif (len(argv) == 2) and (argv[1].upper() == 'CREATE'):
-                self.InputFile = argv[0]
-                # if the file exists it is overwritten
-                f = open(self.InputFile, "w")
-                f.close()
-                self.createProject()
-                # Save the temporary input file
-                self.BinTempfile = f'{self.InputFile[0:-4]}_temp.inp'
-                self.__exist_inp_file = True
+            if not p.is_file():
+                target = p.name
+
+                # Build and cache an index of all .inp files under epyt_root (once)
+                inp_index = getattr(self, "_inp_index", None)
+                if inp_index is None:
+                    inp_index = {}
+                    for entry in Path(epyt_root).rglob("*.inp"):
+                        # keep first occurrence only
+                        inp_index.setdefault(entry.name, str(entry))
+                    self._inp_index = inp_index
+
+                fullpath = self._inp_index.get(target)
+                if fullpath:
+                    p = Path(fullpath)
+                    self.InputFile = str(p)
+                elif createinp:
+                    self.InputFile = argv[0]
+                    # if the file exists it is overwritten
+                    f = open(self.InputFile, "w")
+                    f.close()
+                    self.createProject()
+                    # Save the temporary input file
+                    self.TempInpFile = f'{self.InputFile[0:-4]}_temp.inp'
+                else:
+                    warnings.warn(f'File "{self.InputFile}" does not exist in "{epyt_root}".')
+                    sys.exit(1)
+
+            # file confirmed to exist at this point
+            self.__exist_inp_file = True
+
+            base = p.with_suffix("")  # remove ".inp"
+            self.TempInpFile = f"{base}_temp.inp"
+            self.RptTempfile = f"{base}_temp.txt"
+            self.BinTempfile = f"{base}_temp.bin"
+
+            copy2(self.InputFile, self.TempInpFile)
+
+            if ph:
+                self.api.ENopenX(self.TempInpFile, self.RptTempfile, self.BinTempfile)
+            else:
+                self.api.ENopen(self.TempInpFile, self.RptTempfile, self.BinTempfile)
+
+            if self.api.errcode >= 200 and self.api.errcode < 300:
+                self.api.ENclose()  # close the file and fetch report contents
+                with open(self.RptTempfile, "r") as f:
+                    print(f.read())
+                self.api.ENopenX(self.TempInpFile, self.RptTempfile, self.BinTempfile)
+
+            if not loadfile and not createinp:
+                self.__getInitParams()
 
             if not self.__exist_inp_file:
                 msg = f'File "{self.InputFile}" does not exist.'
@@ -853,7 +583,7 @@ class epanet(error_handler):
         >>> d.getControls(index).to_dict()
 
         See also deleteControls, getControls, setControls,
-        getControlRulesCount.
+        getControlCount.
         """
         if type(control) is dict:
             index = []
@@ -1210,6 +940,26 @@ class epanet(error_handler):
                  addLinkValvePRV, deleteLink, setLinkTypeValveFCV.
         """
         return self.api.ENaddlink(vID, self.ToolkitConstants.EN_GPV,
+                                  fromNode, toNode)
+
+    def addLinkValvePCV(self, vID, fromNode, toNode):
+        """ Adds a new PCV valve.
+        Returns the index of the new PCV valve.
+
+         The example is based on d = epanet('Net1.inp')
+
+        Example:
+
+        >>> valveID = 'newValvePCV'
+        >>> fromNode = '10'
+        >>> toNode = '21'
+        >>> valveIndex = d.addLinkValvePCV(valveID, fromNode, toNode)
+        >>> d.plot()
+
+        See also plot, setLinkNodesIndex, addLinkPipe,
+                 addLinkValvePCV, deleteLink, setLinkTypeValvePCV.
+        """
+        return self.api.ENaddlink(vID, self.ToolkitConstants.EN_PCV,
                                   fromNode, toNode)
 
     def addLinkValvePBV(self, vID, fromNode, toNode):
@@ -1884,10 +1634,10 @@ class epanet(error_handler):
         >>> d.deleteControls([index_3, index_4])
         >>> d.getControls()
 
-        See also addControls, setControls, getControls, getControlRulesCount.
+        See also addControls, setControls, getControls, getControlCount.
         """
         if len(argv) == 0:
-            index = list(range(1, self.getControlRulesCount() + 1))
+            index = list(range(1, self.getControlCount() + 1))
         else:
             index = argv[0]
         if not isList(index): index = [index]
@@ -2225,19 +1975,18 @@ class epanet(error_handler):
         value = []
         if len(argv) > 0:
             indices = argv[0]
+            for i in indices:
+                value.append(self.api.ENgetnodevalue(i, self.ToolkitConstants.EN_QUALITY))
         else:
-            indices = self.getNodeIndex()
-        for i in indices:
-            value.append(
-                self.api.ENgetnodevalue(i, self.ToolkitConstants.EN_QUALITY)
-            )
+            value = self.api.ENgetnodevalues(self.ToolkitConstants.EN_QUALITY)
+
         return np.array(value)
 
     def getCMDCODE(self):
         """ Retrieves the CMC code """
         return self.CMDCODE
 
-    def getComputedHydraulicTimeSeries(self, matrix=True, *argv):
+    def getComputedHydraulicTimeSeries(self, *argv):
         """ Computes hydraulic simulation and retrieves all time-series.
 
         Data that is computed:
@@ -2247,7 +1996,10 @@ class epanet(error_handler):
           4) DemandDeficit     11) Setting
           5) Head              12) Energy
           6) TankVolume        13) Efficiency
-          7) Flow
+          7) Flow              14) State
+          15) LinkLeakageRate  16) EmitterFlow
+          17) DemandDelivered  18) DemandRequested
+          19) NodeLeakageFlow
 
         Example 1:
 
@@ -2255,13 +2007,6 @@ class epanet(error_handler):
         >>> d.getComputedHydraulicTimeSeries()
 
         Example 2:
-
-        # Retrieves all the time-series demands
-        >>> d.getComputedHydraulicTimeSeries().Demand
-        # Retrieves all the time-series flows
-        >>> d.getComputedHydraulicTimeSeries().Flow
-
-        Example 3:
 
         # Retrieves all the time-series Time, Pressure, Velocity
         >>> data = d.getComputedHydraulicTimeSeries(['Time',
@@ -2274,30 +2019,34 @@ class epanet(error_handler):
         See also getComputedQualityTimeSeries, getComputedTimeSeries.
         """
         value = EpytValues()
-        self.openHydraulicAnalysis()
+        self.api.ENopenH()
         self.api.solve = 1
-        self.initializeHydraulicAnalysis()
-        sensingnodes = 0
+        self.api.ENinitH(self.ToolkitConstants.EN_SAVE)
+
         if len(argv) == 0:
             attrs = ['time', 'pressure', 'demand', 'demanddeficit', 'head',
                      'tankvolume', 'flow', 'velocity', 'headloss', 'status',
-                     'setting', 'energy', 'efficiency', 'state']
+                     'setting', 'energy', 'efficiency', 'state', 'linkleakagerate', 'nodeleakageflow', 'emitterflow',
+                     'demanddelivered', 'demandrequested']
+        elif len(argv) > 1:
+            attrs = [str(a).strip().lower() for a in argv]
         else:
-            attrs = argv[0]
-            for i in attrs:
-                if type(i) is int:
-                    sensingnodes = i
-        if 'time' in attrs:
-            value.Time = []
+            x = argv[0]
+            if isinstance(x, str):
+                attrs = [x.strip().lower()]
+            else:
+                try:
+                    attrs = [str(a).strip().lower() for a in x]
+                except TypeError:
+                    attrs = [str(x).strip().lower()]
+
+        value.Time = []
         if 'pressure' in attrs:
             value.Pressure = {}
         if 'demand' in attrs:
             value.Demand = {}
         if 'demanddeficit' in attrs:
             value.DemandDeficit = {}
-        if 'demandSensingNodes' in attrs:
-            value.DemandSensingNodes = {}
-            value.SensingNodesIndices = attrs[sensingnodes - 1]
         if 'head' in attrs:
             value.Head = {}
         if 'tankvolume' in attrs:
@@ -2320,178 +2069,212 @@ class epanet(error_handler):
         if 'state' in attrs:
             value.State = {}
             value.StateStr = {}
+        if 'linkleakagerate' in attrs:
+            value.LinkLeakageRate = {}
+        if 'nodeleakageflow' in attrs:
+            value.NodeLeakageFlow = {}
+        if 'emitterflow' in attrs:
+            value.EmitterFlow = {}
+        if 'demanddelivered' in attrs:
+            value.DemandDelivered = {}
+        if 'demandrequested' in attrs:
+            value.DemandRequested = {}
+
+        nLinks = self.api.ENgetcount(self.ToolkitConstants.EN_LINKCOUNT)
+        nNodes = self.api.ENgetcount(self.ToolkitConstants.EN_NODECOUNT)
+        idxL = self.getLinkTypeIndex()
+        idxL = np.asarray(idxL)
+        pipecount = np.isin(
+            idxL,
+            [self.ToolkitConstants.EN_PIPE, self.ToolkitConstants.EN_CVPIPE]
+        ).sum()
+        pumpcount = (idxL == self.ToolkitConstants.EN_PUMP).sum()
+        valvecount = nLinks - pumpcount - pipecount
+        idxN = self.getNodeTypeIndex()
+        idxN = np.asarray(idxN)
+        tankrescount = self.api.ENgetcount(self.ToolkitConstants.EN_TANKCOUNT)
+        junctioncount = nNodes - tankrescount
+        rescount = (idxN == self.ToolkitConstants.EN_RESERVOIR).sum()
         k, tstep = 1, 1
         while tstep > 0:
-            t = self.runHydraulicAnalysis()
-            if 'time' in attrs:
-                value.Time.append(t)
+            t = self.api.ENrunH()
+            value.Time.append(t)
             if 'pressure' in attrs:
-                value.Pressure[k] = self.getNodePressure()
+                value.Pressure[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_PRESSURE)
             if 'demand' in attrs:
-                value.Demand[k] = self.getNodeActualDemand()
+                value.Demand[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_DEMAND)
             if 'demanddeficit' in attrs:
-                value.DemandDeficit[k] = self.getNodeDemandDeficit()
-            if 'demandSensingNodes' in attrs:
-                value.DemandSensingNodes[k] = \
-                    self.getNodeActualDemandSensingNodes(
-                        attrs[sensingnodes - 1]
-                    )
+                value.DemandDeficit[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_DEMANDDEFICIT)
             if 'head' in attrs:
-                value.Head[k] = self.getNodeHydraulicHead()
+                value.Head[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_HEAD)
             if 'tankvolume' in attrs:
-                value.TankVolume[k] = np.zeros(
-                    self.getNodeJunctionCount() +
-                    self.getNodeReservoirCount()
-                )
-                value.TankVolume[k] = np.concatenate((
-                    value.TankVolume[k],
-                    self.getNodeTankVolume()))
+                # Optimize: create array once instead of concatenating
+                num_non_tanks = junctioncount + rescount
+                tank_volumes = self.getNodeTankVolume()
+                value.TankVolume[k] = np.concatenate((np.zeros(num_non_tanks), tank_volumes))
             if 'flow' in attrs:
-                value.Flow[k] = self.getLinkFlows()
+                value.Flow[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_FLOW)
             if 'velocity' in attrs:
-                value.Velocity[k] = self.getLinkVelocity()
+                value.Velocity[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_VELOCITY)
             if 'headloss' in attrs:
-                value.HeadLoss[k] = self.getLinkHeadloss()
+                value.HeadLoss[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_HEADLOSS)
             if 'status' in attrs:
-                value.Status[k] = self.getLinkStatus()
-                value.StatusStr[k] = []
-                for i in value.Status[k]:
-                    value.StatusStr[k].append(self.TYPESTATUS[i])
-                value.StatusStr[k] = np.array(value.StatusStr[k])
+                value.Status[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_STATUS)
+                st = np.asarray(value.Status[k]).astype(int)
+                value.StatusStr[k] = np.array([self.TYPESTATUS[i] for i in st])
             if 'setting' in attrs:
-                value.Setting[k] = self.getLinkSettings()
+                value.Setting[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_SETTING)
             if 'energy' in attrs:
-                value.Energy[k] = self.getLinkEnergy()
+                value.Energy[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_ENERGY)
             if 'efficiency' in attrs:
-                value.Efficiency[k] = np.zeros(self.getLinkPipeCount())
-                value.Efficiency[k] = np.concatenate((
-                    value.Efficiency[k],
-                    self.getLinkPumpEfficiency()))
-                value.Efficiency[k] = np.concatenate((
-                    value.Efficiency[k],
-                    np.zeros(self.getLinkValveCount())))
+                # Optimize: create array once with all parts
+                pipe_zeros = np.zeros(pipecount)
+                pump_eff = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_PUMP_EFFIC)
+                valve_zeros = np.zeros(valvecount)
+                value.Efficiency[k] = np.concatenate((pipe_zeros, pump_eff, valve_zeros))
             if 'state' in attrs:
-                value.State[k] = self.getLinkPumpState()
-                value.StateStr[k] = []
-                for i in value.State[k]:
-                    value.StateStr[k].append(self.TYPEPUMPSTATE[int(i)])
-                value.StateStr[k] = np.array(value.StateStr[k])
-            tstep = self.nextHydraulicAnalysisStep()
+                value.State[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_PUMP_STATE)
+                ps = np.asarray(value.State[k]).astype(int) + 1
+                value.StateStr[k] = np.array([self.TYPEPUMPSTATE[i] for i in ps])
+            if 'linkleakagerate' in attrs:
+                value.LinkLeakageRate[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_LINK_LEAKAGE)
+            if 'nodeleakageflow' in attrs:
+                value.NodeLeakageFlow[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_LEAKAGEFLOW)
+            if 'emitterflow' in attrs:
+                value.EmitterFlow[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_EMITTERFLOW)
+            if 'demanddelivered' in attrs:
+                value.DemandDelivered[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_DEMANDFLOW)
+            if 'demandrequested' in attrs:
+                value.DemandRequested[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_FULLDEMAND)
+
+            tstep = self.api.ENnextH()
             k += 1
-        self.closeHydraulicAnalysis()
+        self.api.ENcloseH()
         value.Time = np.array(value.Time)
 
         value_final = EpytValues()
         val_dict = value.__dict__
-        for i in val_dict:
-            if type(val_dict[i]) is dict:
-                exec(f"value_final.{i} = np.array(list(val_dict[i].values()))")
+        for key, val in val_dict.items():
+            if isinstance(val, dict):
+                # Avoid exec() - use direct attribute assignment
+                setattr(value_final, key, np.array(list(val.values())))
             else:
-                exec(f"value_final.{i} = val_dict[i]")
+                setattr(value_final, key, val)
         return value_final
 
     def getComputedQualityTimeSeries(self, *argv):
-        """ Computes Quality simulation and retrieves all or some time-series.
+        """Compute the quality simulation and retrieve selected time-series.
 
-        Data that is computed:
+        Data that can be computed:
           1) Time
           2) NodeQuality
           3) LinkQuality
           4) MassFlowRate
+          5) Demand
+          6) QualitySensingNodes
+          7) DemandSensingNodes
 
         Example 1:
 
-        # Retrieves all the time-series data
+        # Retrieves all time-series data
         >>> d.getComputedQualityTimeSeries()
+
         Example 2:
 
-        # Retrieves all the time-series node quality
+        # Retrieves the node quality time-series
         >>> d.getComputedQualityTimeSeries().NodeQuality
-        # Retrieves all the time-series link quality
+        # Retrieves the link quality time-series
         >>> d.getComputedQualityTimeSeries().LinkQuality
 
         Example 3:
 
-        # Retrieves all the time-series Time, NodeQuality, LinkQuality
+        # Retrieves Time, NodeQuality, LinkQuality
         >>> data = d.getComputedQualityTimeSeries(['time',
         ...                                        'nodequality',
-                                                   'linkquality'])
+        ...                                        'linkquality'])
         >>> time = data.Time
         >>> node_quality = data.NodeQuality
         >>> link_quality = data.LinkQuality
 
+        Example 4:
+
+        # Retrieves quality at sensing nodes (pass indices as the second argument)
+        >>> data = d.getComputedQualityTimeSeries(['time', 'qualitysensingnodes'], sensing_node_indices)
+
         See also getComputedHydraulicTimeSeries, getComputedTimeSeries.
         """
         value = EpytValues()
-        sensingnodes = 0
+
         if not self.api.solve:
-            self.solveCompleteHydraulics()
+            self.api.ENsolveH()
             self.api.solve = 1
-        self.openQualityAnalysis()
-        self.initializeQualityAnalysis()
-        # tleft = self.nextQualityAnalysisStep()
+
+        self.api.ENopenQ()
+        self.api.ENinitQ(self.ToolkitConstants.EN_SAVE)
+
         if len(argv) == 0:
             attrs = ['time', 'nodequality', 'linkquality', 'mass']
+        elif len(argv) > 1:
+            attrs = [str(a).strip().lower() for a in argv]
         else:
-            attrs = argv[0]
-            for i in attrs:
-                if type(i) is int:
-                    sensingnodes = i
-        if 'time' in attrs:
-            value.Time = []
+            x = argv[0]
+            if isinstance(x, str):
+                attrs = [x.strip().lower()]
+            else:
+                try:
+                    attrs = [str(a).strip().lower() for a in x]
+                except TypeError:
+                    attrs = [str(x).strip().lower()]
+
+        attrs = [a.lower() for a in attrs]
+
+        value.Time = []
         if 'nodequality' in attrs:
             value.NodeQuality = {}
         if 'linkquality' in attrs:
             value.LinkQuality = {}
-        if 'qualitySensingNodes' in attrs:
-            value.QualitySensingNodes = {}
-            value.SensingNodesIndices = attrs[sensingnodes - 1]
-        if 'demandSensingNodes' in attrs:
-            value.DemandSensingNodes = {}
-            value.SensingNodesIndices = attrs[sensingnodes - 1]
         if 'mass' in attrs:
             value.MassFlowRate = {}
         if 'demand' in attrs:
             value.Demand = {}
-        k, t, tleft = 1, 1, 1
-        sim_duration = self.getTimeSimulationDuration()
-        while tleft > 0 or t < sim_duration:
-            t = self.runQualityAnalysis()
-            if 'time' in attrs:
-                value.Time.append(t)
+
+        sim_duration = self.api.ENgettimeparam(self.ToolkitConstants.EN_DURATION)
+        k = 1
+        tleft = 1
+        while tleft > 0:
+            t = self.api.ENrunQ()
+
+            value.Time.append(t)
             if 'nodequality' in attrs:
-                value.NodeQuality[k] = self.getNodeActualQuality()
+                value.NodeQuality[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_QUALITY)
             if 'linkquality' in attrs:
-                value.LinkQuality[k] = self.getLinkActualQuality()
+                value.LinkQuality[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_LINKQUAL)
             if 'mass' in attrs:
-                value.MassFlowRate[k] = self.getNodeMassFlowRate()
+                value.MassFlowRate[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_SOURCEMASS)
             if 'demand' in attrs:
-                value.Demand[k] = self.getNodeActualDemand()
-            if 'qualitySensingNodes' in attrs:
-                value.QualitySensingNodes[k] = \
-                    self.getNodeActualQualitySensingNodes(argv[1])
-            if 'demandSensingNodes' in attrs:
-                value.DemandSensingNodes[k] = \
-                    self.getNodeActualDemandSensingNodes(
-                        attrs[sensingnodes - 1]
-                    )
+                value.Demand[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_DEMAND)
+
             if t < sim_duration:
                 tleft = self.stepQualityAnalysisTimeLeft()
+
             k += 1
-        self.closeQualityAnalysis()
+
+        self.api.ENcloseQ()
+
         value.Time = np.array(value.Time)
+
         value_final = EpytValues()
-        val_dict = value.__dict__
-        for i in val_dict:
-            if type(val_dict[i]) is dict:
-                exec(f"value_final.{i} = np.array(list(val_dict[i].values()))")
+        for key, val in value.__dict__.items():
+            if isinstance(val, dict):
+                setattr(value_final, key, np.array(list(val.values())))
             else:
-                exec(f"value_final.{i} = val_dict[i]")
+                setattr(value_final, key, val)
+
         return value_final
 
     def getComputedTimeSeries(self):
         """ Run analysis using .exe file """
-        self.saveInputFile(self.TempInpFile)
+        self.api.ENsaveinpfile(self.TempInpFile)
         [fid, binfile, _] = self.runEPANETexe()
         if fid is False:  # temporary.
             value_final = self.getComputedTimeSeries_ENepanet()
@@ -2503,12 +2286,11 @@ class epanet(error_handler):
             value.ErrCode = self.errcode
             self.api.ENgeterror(self.errcode)
 
-        value.StatusStr = {}
-        for i in range(1, len(value.Status) + 1):
-            value.StatusStr[i] = []
-            for j in value.Status[i]:
-                value.StatusStr[i].append(self.TYPEBINSTATUS[int(j)])
-            value.StatusStr[i] = np.array(value.StatusStr[i])
+        tb = np.asarray(self.TYPEBINSTATUS, dtype=object)
+        value.StatusStr = {
+            i: tb[np.asarray(value.Status[i], dtype=np.int16)]
+            for i in range(1, len(value.Status) + 1)
+        }
 
         # Remove report bin txt , files @#
         for file in Path(".").glob("@#*.txt"):
@@ -2516,11 +2298,12 @@ class epanet(error_handler):
         value.Time = np.array(value.Time)
         value_final = EpytValues()
         val_dict = value.__dict__
-        for i in val_dict:
-            if type(val_dict[i]) is dict:
-                exec(f"value_final.{i} = np.array(list(val_dict[i].values()))")
+        for key, val in val_dict.items():
+            if isinstance(val, dict):
+                # Avoid exec() - use direct attribute assignment
+                setattr(value_final, key, np.array(list(val.values())))
             else:
-                exec(f"value_final.{i} = val_dict[i]")
+                setattr(value_final, key, val)
         value_final.Status = value_final.Status.astype(int)
         return value_final
 
@@ -2528,16 +2311,15 @@ class epanet(error_handler):
         """ Run analysis using ENepanet function """
 
         if tempfile is not None:
-            self.saveInputFile(tempfile)
+            self.api.ENsaveinpfile(tempfile)
         else:
-            self.saveInputFile(self.TempInpFile)
+            self.api.ENsaveinpfile(self.TempInpFile)
             uuID = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
 
         if binfile is None:
             binfile = '@#' + uuID + '.bin'
         if rptfile is None:
             rptfile = self.TempInpFile[:-4] + '.txt'
-        self.api.ENclose()
         if tempfile is not None:
             self.api.ENepanet(tempfile, rptfile, binfile)
         else:
@@ -2549,24 +2331,25 @@ class epanet(error_handler):
         if self.errcode:
             value.ErrCode = self.errcode
             value.WarnFlag = True
-        value.StatusStr = {}
-        for i in range(1, len(value.Status) + 1):
-            value.StatusStr[i] = []
-            for j in value.Status[i]:
-                value.StatusStr[i].append(self.TYPEBINSTATUS[int(j)])
+        tb = np.asarray(self.TYPEBINSTATUS, dtype=object)
+        value.StatusStr = {
+            i: tb[np.asarray(value.Status[i], dtype=np.int16)]
+            for i in range(1, len(value.Status) + 1)
+        }
         # Remove report bin txt , files @#
         for file in Path(".").glob("@#*.txt"):
             file.unlink()
         value.Time = np.array(value.Time)
         value_final = EpytValues()
         val_dict = value.__dict__
-        for i in val_dict:
-            if type(val_dict[i]) is dict:
-                exec(f"value_final.{i} = np.array(list(val_dict[i].values()))")
+        for key, val in val_dict.items():
+            if isinstance(val, dict):
+                # Avoid exec() - use direct attribute assignment
+                setattr(value_final, key, np.array(list(val.values())))
             else:
-                exec(f"value_final.{i} = val_dict[i]")
+                setattr(value_final, key, val)
         value_final.Status = value_final.Status.astype(int)
-        self.loadEPANETFile(self.TempInpFile)
+        self.api.ENopen(self.TempInpFile, self.TempInpFile[0:-4] + '.txt', self.TempInpFile[0:-4] + '.bin')
         return value_final
 
     def getAdjacencyMatrix(self):
@@ -2685,6 +2468,17 @@ class epanet(error_handler):
         """
         return self.api.ENgetcount(self.ToolkitConstants.EN_CONTROLCOUNT)
 
+    def getControlCount(self):
+        """ Retrieves the number of controls.
+
+        Example:
+
+        >>> d.getControlCount()
+
+        See also getControls, getRuleCount.
+        """
+        return self.api.ENgetcount(self.ToolkitConstants.EN_CONTROLCOUNT)
+
     def getCurveComment(self, *argv):
         """ Retrieves the comment string of a curve.
 
@@ -2741,7 +2535,7 @@ class epanet(error_handler):
         >>> d.getCounts().SimpleControls
 
         See also getNodeCount, getNodeJunctionCount, getLinkCount,
-        getControlRulesCount.
+        getControlCount.
         """
         value = EpytValues()
         value.Nodes = self.getNodeCount()
@@ -2753,7 +2547,7 @@ class epanet(error_handler):
         value.Pumps = self.getLinkPumpCount()
         value.Valves = self.getLinkValveCount()
         value.Curves = self.getCurveCount()
-        value.SimpleControls = self.getControlRulesCount()
+        value.SimpleControls = self.getControlCount()
         value.RuleBasedControls = self.getRuleCount()
         value.Patterns = self.getPatternCount()
         return value
@@ -3128,18 +2922,16 @@ class epanet(error_handler):
         See also getLinkTypeIndex, getLinksInfo, getLinkDiameter,
         getLinkLength, getLinkRoughnessCoeff, getLinkMinorLossCoeff.
         """
-        lTypes = []
         if len(argv) > 0:
             index = argv[0]
             if isinstance(index, list):
-                for i in index:
-                    lTypes.append(self.TYPELINK[self.api.ENgetlinktype(i)])
+                # Optimize: use list comprehension instead of append loop
+                return [self.TYPELINK[self.api.ENgetlinktype(i)] for i in index]
             else:
-                lTypes = self.TYPELINK[self.api.ENgetlinktype(index)]
+                return self.TYPELINK[self.api.ENgetlinktype(index)]
         else:
-            for i in range(self.getLinkCount()):
-                lTypes.append(self.TYPELINK[self.api.ENgetlinktype(i + 1)])
-        return lTypes
+            # Optimize: use list comprehension instead of append loop
+            return [self.TYPELINK[self.api.ENgetlinktype(i + 1)] for i in range(self.getLinkCount())]
 
     def getLinkTypeIndex(self, *argv):
         """ Retrieves the link-type code for all links.
@@ -3156,18 +2948,17 @@ class epanet(error_handler):
         See also getLinkType, getLinksInfo, getLinkDiameter,
         getLinkLength, getLinkRoughnessCoeff, getLinkMinorLossCoeff.
         """
-        lTypes = []
         if len(argv) > 0:
             index = argv[0]
             if isinstance(index, list):
-                for i in index:
-                    lTypes.append(self.api.ENgetlinktype(i))
+                # Optimize: get all types once and index into results
+                all_types = [self.api.ENgetlinktype(i + 1) for i in range(self.getLinkCount())]
+                return [all_types[i - 1] for i in index]
             else:
-                lTypes = self.api.ENgetlinktype(index)
+                return self.api.ENgetlinktype(index)
         else:
-            for i in range(self.getLinkCount()):
-                lTypes.append(self.api.ENgetlinktype(i + 1))
-        return lTypes
+            # Get all link types - this could be cached if needed
+            return [self.api.ENgetlinktype(i + 1) for i in range(self.getLinkCount())]
 
     def getLinkDiameter(self, *argv):
         """ Retrieves the value of link diameters.
@@ -3650,9 +3441,7 @@ class epanet(error_handler):
         See also getLinkPumpTypeCode(), getLinkPumpPower.
         """
         v = self.getLinkPumpTypeCode()
-        pType = []
-        for i in v:
-            pType.append(self.TYPEPUMP[i])
+        pType = [self.TYPEPUMP[i] for i in v]
         return pType
 
     def getLinkPumpTypeCode(self):
@@ -3692,25 +3481,17 @@ class epanet(error_handler):
         getLinkLength, getLinkRoughnessCoeff, getLinkMinorLossCoeff.
         """
         value = EpytValues()
-        value.LinkDiameter = []
-        value.LinkLength = []
-        value.LinkRoughnessCoeff = []
-        value.LinkMinorLossCoeff = []
-        value.LinkInitialStatus = []
-        value.LinkInitialSetting = []
-        value.LinkBulkReactionCoeff = []
-        value.LinkWallReactionCoeff = []
+        value.LinkDiameter = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_DIAMETER)
+        value.LinkLength = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_LENGTH)
+        value.LinkRoughnessCoeff = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_ROUGHNESS)
+        value.LinkMinorLossCoeff = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_MINORLOSS)
+        value.LinkInitialStatus = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_INITSTATUS)
+        value.LinkInitialSetting = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_INITSETTING)
+        value.LinkBulkReactionCoeff = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_KBULK)
+        value.LinkWallReactionCoeff = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_KWALL)
         value.LinkTypeIndex = []
         value.NodesConnectingLinksIndex = [[0, 0] for _ in range(self.getLinkCount())]
         for i in range(1, self.getLinkCount() + 1):
-            value.LinkDiameter.append(self.api.ENgetlinkvalue(i, self.ToolkitConstants.EN_DIAMETER))
-            value.LinkLength.append(self.api.ENgetlinkvalue(i, self.ToolkitConstants.EN_LENGTH))
-            value.LinkRoughnessCoeff.append(self.api.ENgetlinkvalue(i, self.ToolkitConstants.EN_ROUGHNESS))
-            value.LinkMinorLossCoeff.append(self.api.ENgetlinkvalue(i, self.ToolkitConstants.EN_MINORLOSS))
-            value.LinkInitialStatus.append(self.api.ENgetlinkvalue(i, self.ToolkitConstants.EN_INITSTATUS))
-            value.LinkInitialSetting.append(self.api.ENgetlinkvalue(i, self.ToolkitConstants.EN_INITSETTING))
-            value.LinkBulkReactionCoeff.append(self.api.ENgetlinkvalue(i, self.ToolkitConstants.EN_KBULK))
-            value.LinkWallReactionCoeff.append(self.api.ENgetlinkvalue(i, self.ToolkitConstants.EN_KWALL))
             value.LinkTypeIndex.append(self.api.ENgetlinktype(i))
             xy = self.api.ENgetlinknodes(i)
             value.NodesConnectingLinksIndex[i - 1][0] = xy[0]
@@ -4198,10 +3979,11 @@ class epanet(error_handler):
         value = []
         if len(argv) > 0:
             indices = argv[0]
+            for i in indices:
+                value.append(self.api.ENgetnodevalue(i, self.ToolkitConstants.EN_DEMAND))
         else:
-            indices = self.getNodeIndex()
-        for i in indices:
-            value.append(self.api.ENgetnodevalue(i, self.ToolkitConstants.EN_DEMAND))
+            value = self.api.ENgetnodevalues(self.ToolkitConstants.EN_DEMAND)
+
         return np.array(value)
 
     def getNodeCount(self):
@@ -4289,7 +4071,7 @@ class epanet(error_handler):
             value.append(self.api.ENgetcomment(self.ToolkitConstants.EN_NODE, i))
         return value
 
-    def getNodeCoordinates(self, *argv):
+    def getNodeCoordinates(self, *argv, init=0):
         # GET VERTICES
         vertices = self.getLinkVertices()
         # SET X Y node coordinates
@@ -4301,6 +4083,8 @@ class epanet(error_handler):
         for i in indices:
             vx.append(self.api.ENgetcoord(i)[0])
             vy.append(self.api.ENgetcoord(i)[1])
+            if init == 1:
+                self.api.errcode = 0
         if len(argv) == 0:
             vxx, vyy = {}, {}
             for i in indices:
@@ -4339,18 +4123,16 @@ class epanet(error_handler):
 
         See also getNodeBaseDemands, getNodeDemandPatternIndex, getNodeDemandPatternNameID.
         """
-        value = []
         if len(argv) > 0:
             index = argv[0]
             if isinstance(index, list):
-                for i in index:
-                    value.append(self.api.ENgetnumdemands(i))
+                # Use list comprehension instead of append loop for better performance
+                return [self.api.ENgetnumdemands(i) for i in index]
             else:
-                value = self.api.ENgetnumdemands(index)
+                return self.api.ENgetnumdemands(index)
         else:
-            for i in range(self.getNodeCount()):
-                value.append(self.api.ENgetnumdemands(i + 1))
-        return value
+            # Use list comprehension instead of append loop for better performance
+            return [self.api.ENgetnumdemands(i + 1) for i in range(self.getNodeCount())]
 
     def getNodeDemandDeficit(self, *argv):
         """  Retrieves the amount that full demand is reduced under PDA.
@@ -4406,11 +4188,9 @@ class epanet(error_handler):
             print(d.getNodeReservoirHeadPatternIndex())
 
         """
-        value = []
-        for i in self.getNodeReservoirIndex():
-            pattern_index = self.api.ENgetnodevalue(i, self.ToolkitConstants.EN_PATTERN)
-            value.append(pattern_index)
-        return value
+        indexes = self.getNodeReservoirIndex()
+        values = self.api.ENgetnodevalues(self.ToolkitConstants.EN_PATTERN)
+        return [values[i - 1] for i in indexes]
 
     def getNodeDemandPatternNameID(self):
         """ Retrieves the value of all node base demands pattern name ID.
@@ -4468,6 +4248,11 @@ class epanet(error_handler):
         See also setNodeEmitterCoeff, getNodesInfo, getNodeElevations.
         """
         return self.__getNodeInfo(self.ToolkitConstants.EN_EMITTER, *argv)
+
+    def getNodeEmitterFlow(self, *argv):
+        """Retrieves node emmiter flow"""
+
+        return self.__getNodeInfo(self.ToolkitConstants.EN_EMITTERFLOW, *argv)
 
     def getNodeHydraulicHead(self, *argv):
         """ Retrieves the computed values of all node hydraulic heads.
@@ -4697,6 +4482,7 @@ class epanet(error_handler):
                 value.append(temp_val)
             else:
                 value.append(None)
+                self.api.errcode = 0
         return np.array(value)
 
     def getNodePatternIndex(self, *argv):
@@ -4948,6 +4734,7 @@ class epanet(error_handler):
                 value.append(e)
             else:
                 value.append(0)
+                self.api.errcode = 0
         if len(argv) > 0 and not isList(argv[0]):
             return value[0]
         return self.to_array(value)
@@ -4973,6 +4760,7 @@ class epanet(error_handler):
                     value.append(e)
                 else:
                     value.append(0)
+                    self.api.errcode = 0
             except Exception as Errcode:
                 if self.api.errcode == 203:
                     return self.getError(Errcode)
@@ -5026,6 +4814,7 @@ class epanet(error_handler):
                     value.append(e)
                 else:
                     value.append(0)
+                    self.api.errcode = 0
             except Exception as Errcode:
                 if self.api.errcode == 203:
                     return self.getError(Errcode)
@@ -5551,18 +5340,16 @@ class epanet(error_handler):
 
         See also getNodeNameID, getNodeIndex, getNodeTypeIndex, getNodesInfo.
         """
-        nTypes = []
         if len(argv) > 0:
             index = argv[0]
             if isinstance(index, list):
-                for i in index:
-                    nTypes.append(self.TYPENODE[self.api.ENgetnodetype(i)])
+                # Optimize: use list comprehension instead of append loop
+                return [self.TYPENODE[self.api.ENgetnodetype(i)] for i in index]
             else:
-                nTypes = self.TYPENODE[self.api.ENgetnodetype(index)]
+                return self.TYPENODE[self.api.ENgetnodetype(index)]
         else:
-            for i in range(self.getNodeCount()):
-                nTypes.append(self.TYPENODE[self.api.ENgetnodetype(i + 1)])
-        return nTypes
+            # Optimize: use list comprehension instead of append loop
+            return [self.TYPENODE[self.api.ENgetnodetype(i + 1)] for i in range(self.getNodeCount())]
 
     def getNodeTypeIndex(self, *argv):
         """ Retrieves the node-type code for all nodes.
@@ -5574,18 +5361,16 @@ class epanet(error_handler):
 
         See also getNodeNameID, getNodeIndex, getNodeType, getNodesInfo.
         """
-        nTypes = []
         if len(argv) > 0:
             index = argv[0]
             if isinstance(index, list):
-                for i in index:
-                    nTypes.append(self.api.ENgetnodetype(i))
+                # Optimize: use list comprehension instead of append loop
+                return [self.api.ENgetnodetype(i) for i in index]
             else:
-                nTypes = self.api.ENgetnodetype(index)
+                return self.api.ENgetnodetype(index)
         else:
-            for i in range(self.getNodeCount()):
-                nTypes.append(self.api.ENgetnodetype(i + 1))
-        return nTypes
+            # Optimize: use list comprehension instead of append loop
+            return [self.api.ENgetnodetype(i + 1) for i in range(self.getNodeCount())]
 
     def getOptionsAccuracyValue(self):
         """ Retrieves the total normalized flow change for hydraulic convergence.
@@ -5841,6 +5626,30 @@ class epanet(error_handler):
         """
         return int(self.api.ENgetoption(self.ToolkitConstants.EN_TANKORDER))
 
+    def getOptionsPressureUnits(self):
+        """
+        Gets the pressure unit used in Epanet
+        """
+        z = int(self.api.ENgetoption(self.ToolkitConstants.EN_PRESS_UNITS))
+        if z == self.ToolkitConstants.EN_PSI:
+            return "PSI"
+        if z == self.ToolkitConstants.EN_KPA:
+            return "KPA"
+        if z == self.ToolkitConstants.EN_METERS:
+            return "METERS"
+
+    def getOptionsStatusReport(self):
+        """ Gets the status report ,
+        (`EN_NO_REPORT`, `EN_NORMAL_REPORT` or `EN_FULL_REPORT`)."""
+
+        z = int(self.api.ENgetoption(self.ToolkitConstants.EN_STATUS_REPORT))
+        if z == self.ToolkitConstants.EN_NO_REPORT:
+            return "NO REPORT"
+        if z == self.ToolkitConstants.EN_NORMAL_REPORT:
+            return "NORMAL REPORT"
+        if z == self.ToolkitConstants.EN_FULL_REPORT:
+            return "FULL REPORT"
+
     def getPattern(self):
         """
         Retrieves the multiplier factor for all patterns and all times.
@@ -5878,6 +5687,14 @@ class epanet(error_handler):
         for i in self.getPatternIndex():
             value.append(self.api.ENgetaveragepatternvalue(i))
         return value
+
+    def getPatternAverageDefaultValue(self):
+        """Retrieves the average value of the default pattern
+
+        Example:
+               d = epanet(network.inp)
+               d.getPatternAverageDefaultValue() """
+        return self.api.ENgetaveragepatternvalue(0)
 
     def getPatternComment(self, *argv):
         """ Retrieves the comment string assigned to the pattern object.
@@ -6123,7 +5940,7 @@ class epanet(error_handler):
 
         >>> d.getRuleCount()
 
-        See also getRules, getControlRulesCount.
+        See also getRules, getControlCount.
         """
         return self.api.ENgetcount(self.ToolkitConstants.EN_RULECOUNT)
 
@@ -6312,7 +6129,56 @@ class epanet(error_handler):
         value.RelativeError = self.api.ENgetstatistic(self.ToolkitConstants.EN_RELATIVEERROR)
         value.DeficientNodes = self.api.ENgetstatistic(self.ToolkitConstants.EN_DEFICIENTNODES)
         value.DemandReduction = self.api.ENgetstatistic(self.ToolkitConstants.EN_DEMANDREDUCTION)
+        value.TotalLeakageLoss = self.api.ENgetstatistic(self.ToolkitConstants.EN_LEAKAGELOSS)
         return value
+
+    def getStatisticTotalLeakageLoss(self):
+        """
+           Retrieves the total leakage loss statistic from the simulation.
+
+           Returns:
+               float: The total amount of leakage loss in the system,
+
+        """
+        return self.api.ENgetstatistic(self.ToolkitConstants.EN_LEAKAGELOSS)
+
+    def getStatisticIterations(self):
+        """
+            Retrieves the number of iterations taken in the simulation.
+
+            Returns:
+                int: The total number of iterations performed during the hydraulic analysis,
+
+        """
+        return self.api.ENgetstatistic(self.ToolkitConstants.EN_ITERATIONS)
+
+    def getStatisticRelativeError(self):
+        """
+            Retrieves the relative error statistic from the simulation.
+
+            Returns:
+                float: The relative error from the last hydraulic iteration
+        """
+        return self.api.ENgetstatistic(self.ToolkitConstants.EN_RELATIVEERROR)
+
+    def getStatisticDeficientNodes(self):
+        """
+            Retrieves the number of deficient nodes in the simulation.
+
+            Returns:
+                int: The number of nodes in the system that are unable to meet the required demand,
+
+        """
+        return self.api.ENgetstatistic(self.ToolkitConstants.EN_DEFICIENTNODES)
+
+    def getStatisticDemandReduction(self):
+        """
+            Retrieves the demand reduction statistic from the simulation.
+
+            Returns:
+                float: The total demand reduction in the system
+            """
+        return self.api.ENgetstatistic(self.ToolkitConstants.EN_DEMANDREDUCTION)
 
     def getTimeSimulationDuration(self):
         """ Retrieves the value of simulation duration.
@@ -6453,6 +6319,17 @@ class epanet(error_handler):
         """
         return self.api.ENgettimeparam(self.ToolkitConstants.EN_PERIODS)
 
+    def getTimeClockStartTime(self):
+        """ Retrieves the simulation starting time of day.
+
+        Example:
+
+        >>> d.getTimeClockStartTime()
+
+        See also getTimeSimulationDuration, getTimePatternStart.
+        """
+        return self.api.ENgettimeparam(self.ToolkitConstants.EN_STARTTIME)
+
     def getTimeStartTime(self):
         """ Retrieves the simulation starting time of day.
 
@@ -6493,7 +6370,7 @@ class epanet(error_handler):
 
         >>> d.getTimeHaltFlag()
 
-        See also getTimeStartTime, getTimeSimulationDuration.
+        See also getTimeClockStartTime, getTimeSimulationDuration.
         """
         return self.api.ENgettimeparam(self.ToolkitConstants.EN_HALTFLAG)
 
@@ -6936,7 +6813,7 @@ class epanet(error_handler):
 
         >>> d.setControls(1, 0, 13, 0, 11, 30)
 
-        See also getControls, getControlRulesCount, addControls, deleteControls.
+        See also getControls, getControlCount, addControls, deleteControls.
         """
         if type(index) is dict:
             for key in index:
@@ -7099,7 +6976,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsAFD()   # d.setFlowUnitsAFD('NET1_AFD.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsCFS, setFlowUnitsIMGD.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_AFD, *argv)  # acre-feet per day
 
@@ -7111,7 +7002,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsCFS()   # d.setFlowUnitsCFS('NET1_CFS.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsAFD, setFlowUnitsIMGD.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_CFS, *argv)  # cubic feet per second
 
@@ -7123,7 +7028,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsCMD()  #  d.setFlowUnitsCMD('NET1_CMD.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsMLD, setFlowUnitsCMH.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_CMD, *argv)  # cubic meters per day
 
@@ -7135,9 +7054,50 @@ class epanet(error_handler):
         >>> d.setFlowUnitsCMH()   # d.setFlowUnitsCMH('NET1_CMH.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsMLD, setFlowUnitsCMD.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_CMH, *argv)  # cubic meters per hour
+
+    def setFlowUnitsCMS(self, *argv):
+
+        """ Sets flow units to CMS(Cubic Meters per Second).
+
+                Example:
+
+                >>> d.setFlowUnitsCMS()
+                >>> d.getFlowUnits()
+
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
+                """
+        self.__setFlowUnits(self.ToolkitConstants.EN_CMS, *argv)
 
     def setFlowUnitsGPM(self, *argv):
         """ Sets flow units to GPM(Gallons Per Minute).
@@ -7147,7 +7107,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsGPM()   # d.setFlowUnitsGPM('NET1_GPM.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsLPS, setFlowUnitsMGD.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_GPM, *argv)  # gallons per minute
 
@@ -7159,7 +7133,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsIMGD()   # d.setFlowUnitsIMGD('NET1_IMGD.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsMGD, setFlowUnitsCFS.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_IMGD, *argv)  # imperial mgd
 
@@ -7171,7 +7159,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsLPM()   #  d.setFlowUnitsLPM('NET1_LPM.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsAFD, setFlowUnitsMLD.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_LPM, *argv)  # liters per minute
 
@@ -7183,7 +7185,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsLPS()   #  d.setFlowUnitsLPS('NET1_LPS.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsGPM, setFlowUnitsMGD.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_LPS, *argv)  # liters per second
 
@@ -7195,7 +7211,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsMGD()   #  d.setFlowUnitsMGD('NET1_MGD.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsGPM, setFlowUnitsLPS.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_MGD, *argv)  # million gallons per day
 
@@ -7207,7 +7237,21 @@ class epanet(error_handler):
         >>> d.setFlowUnitsMLD()   #  d.setFlowUnitsMLD('NET1_MLD.inp')
         >>> d.getFlowUnits()
 
-        See also setFlowUnitsLPM, setFlowUnitsCMH.
+        See also:
+        # Functions for PSI (sorted by higher to lower capacity):
+        setFlowUnitsAFD()  ### Acre-feet per day (higher capacity than GPM)
+        setFlowUnitsIMGD() ### Imperial million gallons per day (higher capacity than AFD)
+        setFlowUnitsCFS()  ### Cubic feet per second (higher capacity than IMGD)
+        setFlowUnitsMGD()  ### Million gallons per day (similar capacity to IMGD)
+        setFlowUnitsGPM()  ### Gallons per minute (lower capacity than AFD, IMGD, CFS, and MGD)
+
+        Functions for KPA and meters (sorted by higher to lower capacity):
+        setFlowUnitsCMH()  ### Cubic meters per hour (higher capacity than CMS)
+        setFlowUnitsCMS()  ### Cubic meters per second (higher capacity than LPS)
+        setFlowUnitsMLD()  ### Million liters per day (higher capacity than CMD and LPM)
+        setFlowUnitsCMD()  ### Cubic meters per day (lower capacity than MLD)
+        setFlowUnitsLPS()  ### Liters per second (lower capacity than CMH and CMS)
+        setFlowUnitsLPM()  ### Liters per minute (lower capacity than LPS)
         """
         self.__setFlowUnits(self.ToolkitConstants.EN_MLD, *argv)  # million liters per day
 
@@ -7979,6 +8023,38 @@ class epanet(error_handler):
         index = self.__checkLinkIfString(Id)
         return self.api.ENsetlinktype(index, self.ToolkitConstants.EN_GPV, condition)
 
+    def setLinkTypeValvePCV(self, Id, *argv):
+        """ Sets the link type valve PCV(Position control valve) for a specified link.
+
+        Note:
+            * condition = 0 | if is EN_UNCONDITIONAL: Delete all controls that contain object
+            * condition = 1 | if is EN_CONDITIONAL: Cancel object type change if contained in controls
+
+        Default condition is 0.
+
+        Example 1:
+
+        >>> d.getLinkType(1)                                    # Retrieves the type of the 1st link
+        >>> linkid = d.getLinkPipeNameID(1)                     # Retrieves the ID of the 1t pipe
+        >>> index = d.setLinkTypeValvePCV(linkid)               # Changes the 1st pipe to valve PCV given it's ID
+        >>> d.getLinkType(index)
+
+        Example 2:
+
+        >>> linkid = d.getLinkPipeNameID(1)
+        >>> condition = 1
+        >>> index = d.setLinkTypeValvePCV(linkid, condition)    # Changes the 1st pipe to valve PCV given it's ID and a condition (if possible)
+        >>> d.getLinkType(index)
+
+        See also getLinkType, getLinkPipeNameID, setLinkTypePipe,
+        setLinkTypePump, setLinkTypeValveFCV.
+        """
+        condition = 0  # default
+        if len(argv) == 1:
+            condition = argv[0]
+        index = self.__checkLinkIfString(Id)
+        return self.api.ENsetlinktype(index, self.ToolkitConstants.EN_PCV, condition)
+
     def setLinkTypeValvePBV(self, Id, *argv):
         """ Sets the link type valve PBV(pressure breaker valve) for a specified link.
 
@@ -8327,7 +8403,8 @@ class epanet(error_handler):
         if value in self.getNodeReservoirIndex():
             self.__setNodeDemandPattern('ENsetdemandpattern', self.ToolkitConstants.EN_PATTERN, value, *argv)
         else:
-            warnings.warn("Invalid reservoir index. For non-reservoir nodes, please use the setNodeDemandPatternIndex function.")
+            warnings.warn(
+                "Invalid reservoir index. For non-reservoir nodes, please use the setNodeDemandPatternIndex function.")
 
     def setNodeElevations(self, value, *argv):
         """ Sets the values of elevation for nodes.
@@ -9346,6 +9423,118 @@ class epanet(error_handler):
         """
         return self.api.ENsetoption(self.ToolkitConstants.EN_TANKORDER, value)
 
+    def setOptionsPressureUnits(self, value):
+        """Sets the pressure unit used in Epanet
+            Example:
+                inpfile = "Net3.inp"
+                d = epanet(inpfile)
+                d.setPressureUnit(1)"""
+
+        return self.api.ENsetoption(self.ToolkitConstants.EN_PRESS_UNITS, value)
+
+    def setOptionsPressureUnitsMeters(self):
+        """Function to set pressure units to meters and check if the change is possible.
+
+        - If not possible, suggests functions to the user to enable the change.
+
+        Example:
+            inpfile = "Net3.inp"
+            d = epanet(inpfile)
+            d.setOptionsPressureUnitsMeters()
+            x = d.getOptionsPressureUnits()
+        """
+        self._ErrorinChangingMetric("KPA AND METERS", "setOptionsPressureUnitsMeters")
+        return self.setOptionsPressureUnits(self.ToolkitConstants.EN_METERS)
+
+    def setOptionsPressureUnitsPSI(self):
+        """Function to set pressure units to PSI and check if the change is possible.
+
+        - If not possible, suggests functions to the user to enable the change.
+
+        Example:
+            inpfile = "Net3.inp"
+            d = epanet(inpfile)
+            d.setOptionsPressureUnitsPSI()
+            x = d.getOptionsPressureUnits()
+            """
+        self._ErrorinChangingMetric("PSI", "setOptionsPressureUnitsPSI")
+        return self.setOptionsPressureUnits(self.ToolkitConstants.EN_PSI)
+
+    def setOptionsPressureUnitsKPA(self):
+        """Function to set pressure units to meters and check if the change is possible.
+
+        - If not possible, suggests functions to the user to enable the change.
+
+        Example:
+            inpfile = "Net3.inp"
+            d = epanet(inpfile)
+            d.setOptionsPressureUnitsKPA()
+            x = d.getOptionsPressureUnits()
+        """
+        self._ErrorinChangingMetric("KPA AND METERS", "setOptionsPressureUnitsKPA")
+        return self.setOptionsPressureUnits(self.ToolkitConstants.EN_KPA)
+
+    def setOptionsStatusReport(self, value):
+        """Sets the status report for epanet
+        (`EN_NO_REPORT`, `EN_NORMAL_REPORT` or `EN_FULL_REPORT`).
+
+        """
+        return self.api.ENsetoption(self.ToolkitConstants.EN_STATUS_REPORT, value)
+
+    def setOptionsStatusReportNo(self):
+        """Function to set the status report option to 'No Report'.
+
+        Returns:
+        The result of the API call to set the status report option. In this case "NO REPORT"
+
+        Example :
+            inpfile = "Net3.inp"
+            d = epanet(inpfile)
+            d.setOptionsStatusReportNo()
+            x = d.getOptionsStatusReport()
+            print(x)
+
+        See Also: setOptionsStatusReportFull , setOptionsStatusReportNormal
+
+        """
+        return self.api.ENsetoption(self.ToolkitConstants.EN_STATUS_REPORT, self.ToolkitConstants.EN_NO_REPORT)
+
+    def setOptionsStatusReportFull(self):
+        """Function to set the status report option to 'No Report'.
+
+            Returns:
+            The result of the API call to set the status report option. In this case "FULL REPORT"
+
+            Example :
+                inpfile = "Net3.inp"
+                d = epanet(inpfile)
+                d.setOptionsStatusReportFull()
+                x = d.getOptionsStatusReport()
+                print(x)
+
+            See Also: setOptionsStatusReportNo , setOptionsStatusReportNormal
+
+            """
+        return self.api.ENsetoption(self.ToolkitConstants.EN_STATUS_REPORT, self.ToolkitConstants.EN_FULL_REPORT)
+
+    def setOptionsStatusReportNormal(self):
+        """Function to set the status report option to 'No Report'.
+
+            Returns:
+            The result of the API call to set the status report option. In this case "NORMAL REPORT"
+
+            Example :
+                inpfile = "Net3.inp"
+                d = epanet(inpfile)
+                d.setOptionsStatusReportNormal()
+                x = d.getOptionsStatusReport()
+                print(x)
+
+            See Also: setOptionsStatusReportNo , setOptionsStatusReportFull
+
+            """
+        return self.api.ENsetoption(self.ToolkitConstants.EN_STATUS_REPORT, self.ToolkitConstants.EN_NORMAL_REPORT)
+
     def setQualityType(self, *argv):
         """ Sets the type of water quality analysis called for.
 
@@ -9850,6 +10039,15 @@ class epanet(error_handler):
         """
         self.api.ENsettimeparam(self.ToolkitConstants.EN_PATTERNSTART, value)
 
+    def setTimeClockStartTime(self, value):
+        """Sets the start time for the simulation.
+
+        Parameters:
+            value (long): The start time of the simulation in seconds.
+                          Warning: The value must be smaller than the total number of seconds
+                          in a day (i.e., 86400 seconds)."""
+        self.api.ENsettimeparam(self.ToolkitConstants.EN_STARTTIME, value)
+
     def setTimePatternStep(self, value):
         """ Sets the time pattern step.
 
@@ -9924,9 +10122,10 @@ class epanet(error_handler):
         >>> d.setTimeSimulationDuration(simulationDuration)
         >>> d.getTimeSimulationDuration()
 
-        See also getTimeSimulationDuration(), getTimeStartTime(), getTimeHaltFlag().
+        See also getTimeSimulationDuration(), getTimeClockStartTime(), getTimeHaltFlag().
         """
         self.api.ENsettimeparam(self.ToolkitConstants.EN_DURATION, value)
+        return self.api.errcode
 
     def setTimeStatisticsType(self, value):
         """ Sets the statistic type.
@@ -10620,13 +10819,13 @@ class epanet(error_handler):
                 self.api.ENclose()
         finally:
             try:
-                safe_delete(self.TempInpFile)
+                _safe_delete(self.TempInpFile)
 
                 files_to_delete = [self.TempInpFile[0:-4] + '.txt', self.InputFile[0:-4] + '.txt', self.BinTempfile]
                 for file in files_to_delete:
-                    safe_delete(file)
+                    _safe_delete(file)
                 for file in Path(".").glob("@#*.txt"):
-                    safe_delete(file)
+                    _safe_delete(file)
 
                 arch = sys.platform
                 if arch == 'win64' or arch == 'win32':
@@ -10640,7 +10839,7 @@ class epanet(error_handler):
                            "." not in f
                     ]
                     tmp_files_paths = [os.path.join(cwd, f) for f in tmp_files]
-                    safe_delete(tmp_files_paths)
+                    _safe_delete(tmp_files_paths)
             except:
                 pass
         if self.display_msg:
@@ -10846,7 +11045,7 @@ class epanet(error_handler):
 
     def __getControlIndices(self, *argv):
         if len(argv) == 0:
-            indices = list(range(1, self.getControlRulesCount() + 1))
+            indices = list(range(1, self.getControlCount() + 1))
         else:
             indices = argv[0]
         return indices
@@ -10951,7 +11150,7 @@ class epanet(error_handler):
         self.CurveIndex = self.getCurveIndex()  # Index of curves
         self.CurvesInfo = self.getCurvesInfo()  # Curves info
 
-        self.ControlRulesCount = self.getControlRulesCount()  # Number of controls
+        self.ControlRulesCount = self.getControlCount()  # Number of controls
         self.Controls = self.getControls()  # Controls information
 
         self.OptionsMaxTrials = self.getOptionsMaxTrials()  # Maximum number of trials (40 is default)
@@ -10997,7 +11196,7 @@ class epanet(error_handler):
         self.TimeStatisticsType = self.getTimeStatisticsType()  # Type ('NONE', 'AVERAGE', 'MINIMUM',
         # 'MAXIMUM', 'RANGE')
         self.TimeReportingPeriods = self.getTimeReportingPeriods()  # Reporting periods
-        self.TimeStartTime = self.getTimeStartTime()  # Number of start time
+        self.TimeStartTime = self.getTimeClockStartTime()  # Number of start time
         self.TimeHTime = self.getTimeHTime()  # Number of htime
         self.TimeHaltFlag = self.getTimeHaltFlag()  # Number of halt flag
         self.TimeNextEvent = self.getTimeNextEvent()  # Find the next event of the hydraulic time step length,
@@ -11010,7 +11209,7 @@ class epanet(error_handler):
         self.Iterations = n.Iterations  # Iterations to reach solution
 
         units = self.getUnits()  # Get all units of the network parameters
-        self.NodeCoordinates = self.getNodeCoordinates()  # Coordinates for each node
+        self.NodeCoordinates = self.getNodeCoordinates(init=1)  # Coordinates for each node
         # (long/lat & intermediate pipe coordinates)
         self.Version = self.getVersion()
 
@@ -11053,18 +11252,16 @@ class epanet(error_handler):
             return self.getLinkIndex()
 
     def __getLinkInfo(self, code_p, *argv):
-        values = []
         if len(argv) > 0:
             index = argv[0]
             if isinstance(index, (list, np.ndarray)):
-                for i in index:
-                    values.append(self.api.ENgetlinkvalue(i, code_p))
+                all_values = np.asarray(self.api.ENgetlinkvalues(code_p))
+                indices = np.asarray(index, dtype=int) - 1  # 1-based -> 0-based
+                return all_values[indices]
             else:
-                values = self.api.ENgetlinkvalue(index, code_p)
+                return np.array(self.api.ENgetlinkvalue(index, code_p))
         else:
-            for i in range(self.getLinkCount()):
-                values.append(self.api.ENgetlinkvalue(i + 1, code_p))
-        return np.array(values)
+            return np.asarray(self.api.ENgetlinkvalues(code_p))
 
     def __getNodeIndices(self, *argv):
         if len(argv) > 0:
@@ -11082,18 +11279,16 @@ class epanet(error_handler):
             return self.getNodeIndex()
 
     def __getNodeInfo(self, code_p, *argv):
-        value = []
         if len(argv) > 0:
             index = argv[0]
             if isinstance(index, (list, np.ndarray)):
-                for i in index:
-                    value.append(self.api.ENgetnodevalue(i, code_p))
+                all_values = np.asarray(self.api.ENgetnodevalues(code_p))
+                indices = np.asarray(index, dtype=int) - 1  # 1-based -> 0-based
+                return all_values[indices]
             else:
-                return self.api.ENgetnodevalue(index, code_p)
+                return np.array(self.api.ENgetnodevalue(index, code_p))
         else:
-            for i in range(self.getNodeCount()):
-                value.append(self.api.ENgetnodevalue(i + 1, code_p))
-        return np.array(value)
+            return np.asarray(self.api.ENgetnodevalues(code_p))
 
     def __getNodeJunctionIndices(self, *argv):
         if len(argv) == 0:
@@ -11126,14 +11321,14 @@ class epanet(error_handler):
             else:
                 if index not in indices:
                     pIndex = self.getLinkPumpIndex(index)
-                    if not pIndex:
+                    if pIndex is None or (isinstance(pIndex, np.ndarray) and pIndex.size == 0):
                         return []
                 else:
                     pIndex = index
                 return self.api.ENgetlinkvalue(pIndex, code_p)
         else:
-            for i in indices:
-                values.append(self.api.ENgetlinkvalue(i, code_p))
+            linkValues = self.api.ENgetlinkvalues(code_p)
+            values = [linkValues[i - 1] for i in indices]
         return np.array(values)
 
     def __getTankNodeInfo(self, code_p, *argv):
@@ -11155,8 +11350,8 @@ class epanet(error_handler):
                     pIndex = index
                 values = self.api.ENgetnodevalue(pIndex, code_p)
         else:
-            for i in indices:
-                values.append(self.api.ENgetnodevalue(i, code_p))
+            nodeValues = self.api.ENgetnodevalues(code_p)
+            values = [nodeValues[i - 1] for i in indices]
         return np.array(values)
 
     def __isMember(self, A, B):
@@ -11303,8 +11498,9 @@ class epanet(error_handler):
             fields_new = ['Pressure', 'Demand', 'Head', 'NodeQuality',
                           'Flow', 'Velocity', 'HeadLoss', 'Status', 'Setting',
                           'ReactionRate', 'FrictionFactor', 'LinkQuality']
-            for i in range(len(fields_param)):
-                exec("v." + fields_new[i] + " = value." + fields_param[i])
+            # Avoid exec() - use direct attribute assignment
+            for old_field, new_field in zip(fields_param, fields_new):
+                setattr(v, new_field, getattr(value, old_field))
             value = v
         # Close bin file and remove it
         f.close()
@@ -11468,19 +11664,12 @@ class epanet(error_handler):
         d.loadMSXFile(msxname, customMSXlib=msxlib)"""
 
         if not os.path.exists(msxname):
-            for root, dirs, files in os.walk(epyt_root):
-                for name in files:
-                    if name.lower().endswith(".msx"):
-                        if name == msxname:
-                            msxname = os.path.join(root, msxname)
-                            break
-                else:
-                    continue
-                break
+            pattern = os.path.join(epyt_root, '**', os.path.basename(msxname))
+            msxname = next(glob.iglob(pattern, recursive=True), msxname)
 
         self.MSXFile = msxname[:-4]
         self.MSXTempFile = msxname[:-4] + '_temp.msx'
-        copyfile(msxname, self.MSXTempFile)
+        copy2(msxname, self.MSXTempFile)
         self.msx = epanetmsxapi(self.MSXTempFile, customMSXlib=customMSXlib, display_msg=self.display_msg,
                                 msxrealfile=self.MSXFile)
 
@@ -11524,17 +11713,31 @@ class epanet(error_handler):
         return self.msx
 
     def unloadMSX(self):
-        """Unload library and close the MSX Toolkit system.
-        Example:
-               d.unloadMSX()
-               """
-        self.msx.MSXclose()
-        arch = sys.platform
-        if arch == 'win64' or arch == 'win32':
-            msx_temp_files = list(filter(lambda f: os.path.isfile(os.path.join(os.getcwd(), f))
-                                                   and f.startswith("msx") and "." not in f, os.listdir(os.getcwd())))
-            safe_delete(msx_temp_files)
-            print('EPANET-MSX Toolkit is unloaded.')
+        """Closes MSX and cleans up temporary MSX files in the current working directory."""
+        # Close MSX first
+        try:
+            self.msx.MSXclose()
+        except Exception as e:
+            print(f"MSXclose failed: {e}")
+
+        # Clean up temp files on Windows
+        if sys.platform.startswith("win"):
+            cwd = os.getcwd()
+
+            msx_temp_files = []
+            for name in os.listdir(cwd):
+                path = os.path.join(cwd, name)
+                if not os.path.isfile(path):
+                    continue
+
+                # EPANET-MSX often creates files like: msxXXXX (no extension)
+                if name.startswith("msx") and "." not in name:
+                    msx_temp_files.append(name)
+
+            if msx_temp_files:
+                _safe_delete(msx_temp_files)
+
+            print("EPANET-MSX Toolkit is unloaded.")
 
     def getMSXSpeciesCount(self):
         """ Retrieves the number of species.
@@ -11631,6 +11834,7 @@ class epanet(error_handler):
         self.msx.MSXsolveQ()
 
     def writeMSXReport(self):
+        """Writes msx report"""
         self.msx.MSXreport()
 
     def useMSXHydraulicFile(self, hydname):
@@ -11725,41 +11929,8 @@ class epanet(error_handler):
         # COMPILER NONE/VC/GC
         # SEGMENTS value
         # PECLET value
-        try:
-            # Key-value pairs to search for
-            keys = ["AREA_UNITS", "RATE_UNITS", "SOLVER", "COUPLING", "TIMESTEP", "ATOL", "RTOL", "COMPILER",
-                    "SEGMENTS", \
-                    "PECLET"]
-            float_values = ["TIMESTEP", "ATOL", "RTOL", "SEGMENTS", "PECLET"]
-            values = {key: None for key in keys}
-
-            # Flag to determine if we're in the [OPTIONS] section
-            in_options = False
-
-            # Open and read the file
-            with open(self.MSXTempFile, 'r') as file:
-                for line in file:
-                    # Check for [OPTIONS] section
-                    if "[OPTIONS]" in line:
-                        in_options = True
-                    elif "[" in line and "]" in line:
-                        in_options = False  # We've reached a new section
-
-                    if in_options:
-                        # Pattern to match the keys and extract values, ignoring comments and whitespace
-                        pattern = re.compile(r'^\s*(' + '|'.join(keys) + r')\s+(.*?)\s*(?:;.*)?$')
-                        match = pattern.search(line)
-                        if match:
-                            key, value = match.groups()
-                            if key in float_values:
-                                values[key] = float(value)
-                            else:
-                                values[key] = value
-
-            return SimpleNamespace(**values)
-        except FileNotFoundError:
-            warnings.warn("Please load MSX File.")
-            return {}
+        options = self.msx.MSXgetoptions()
+        return options
 
     def getMSXTimeStep(self):
         """ Retrieves the time step.
@@ -11896,7 +12067,6 @@ class epanet(error_handler):
         """
         total = self.getMSXConstantsCount()
 
-
         if not ids:
             indices = range(1, total + 1)
 
@@ -11905,7 +12075,6 @@ class epanet(error_handler):
 
         else:
             indices = ids
-
 
         MSX_CONSTANT = self.ToolkitConstants.MSX_CONSTANT
         names = []
@@ -12044,15 +12213,15 @@ class epanet(error_handler):
             index = argv[0]
             if isinstance(index, list):
                 for i in index:
-                    len_id = self.msx.MSXgetIDlen(msx_species, i+1)
-                    values.append(self.msx.MSXgetID(msx_species, i+1, len_id))
+                    len_id = self.msx.MSXgetIDlen(msx_species, i + 1)
+                    values.append(self.msx.MSXgetID(msx_species, i + 1, len_id))
             else:
                 len_id = self.msx.MSXgetIDlen(self.ToolkitConstants.MSX_SPECIES, index)
                 values = self.msx.MSXgetID(msx_species, index, len_id)
         else:
             for i in range(self.getMSXSpeciesCount()):
-                len_id = self.msx.MSXgetIDlen(msx_species, i+1)
-                values.append(self.msx.MSXgetID(msx_species, i+1, len_id))
+                len_id = self.msx.MSXgetIDlen(msx_species, i + 1)
+                values.append(self.msx.MSXgetID(msx_species, i + 1, len_id))
         return values
 
     def getMSXParametersIndex(self, *names):
@@ -12531,7 +12700,7 @@ class epanet(error_handler):
 
         return units
 
-    def getEquations(self):
+    def _getEquations(self):
         msxname = self.MSXTempFile
         Terms = {}
         Pipes = {}
@@ -12595,7 +12764,7 @@ class epanet(error_handler):
                d.getMSXEquationsTerms()
 
              See also getMSXEquationsPipes, getMSXEquationsTanks."""
-        x, y, z = self.getEquations()
+        x, y, z = self._getEquations()
         x = list(x.values())
         return x
 
@@ -12608,7 +12777,7 @@ class epanet(error_handler):
                d.getMSXEquationsPipes()
 
              See also getMSXEquationsTerms, getMSXEquationsTanks."""
-        x, y, z = self.getEquations()
+        x, y, z = self._getEquations()
         y = list(y.values())
         return y
 
@@ -12621,11 +12790,12 @@ class epanet(error_handler):
                d.getMSXEquationsTanks()
 
              See also getMSXEquationsTerms, getMSXEquationsPipes."""
-        x, y, z = self.getEquations()
+        x, y, z = self._getEquations()
         z = list(z.values())
         return z
 
     def getMSXSources(self):
+        "Retrieves Msx sources"
         value = []
         for i in range(1, self.getNodeCount() + 1):
             value_row = []
@@ -13014,34 +13184,6 @@ class epanet(error_handler):
                 nodes.append(i)
         return nodes
 
-    def changeMSXOptions(self, param, change):
-        options_section = 'options_section.msx'
-        self.saveMSXFile(options_section)
-
-        with open(options_section, 'r+') as f:
-            lines = f.readlines()
-            options_index = -1  # Default to -1 in case the [OPTIONS] section does not exist
-            flag = 0
-            for i, line in enumerate(lines):
-                if line.strip() == '[OPTIONS]':
-                    options_index = i
-                elif line.strip().startswith(param):
-                    lines[i] = param + "\t" + str(change) + "\n"
-                    flag = 1
-            if flag == 0 and options_index != -1:
-                lines.insert(options_index + 1, param + "\t" + str(change) + "\n")
-            f.seek(0)
-            f.writelines(lines)
-            f.truncate()
-
-        self.msx.MSXclose()
-        copyfile(options_section, self.MSXTempFile)
-        try:
-            os.remove(options_section)
-        except:
-            pass
-        self.loadMSXEPANETFile(self.MSXTempFile)
-
     def setMSXAreaUnitsCM2(self):
         """  Sets the area units to square centimeters.
 
@@ -13055,7 +13197,7 @@ class epanet(error_handler):
               d.getMSXAreaUnits()
 
              See also setMSXAreaUnitsFT2, setMSXAreaUnitsM2."""
-        self.changeMSXOptions("AREA_UNITS", "CM2")
+        self.msx.MSXsetoptions("AREA_UNITS", "CM2")
 
     def setMSXAreaUnitsFT2(self):
         """ Sets the area units to square feet.
@@ -13070,7 +13212,7 @@ class epanet(error_handler):
               d.getMSXAreaUnits()
 
              See also setMSXAreaUnitsM2, setMSXAreaUnitsCM2."""
-        self.changeMSXOptions("AREA_UNITS", "FT2")
+        self.msx.MSXsetoptions("AREA_UNITS", "FT2")
 
     def setMSXAreaUnitsM2(self):
         """ Sets the area units to square meters.
@@ -13085,7 +13227,7 @@ class epanet(error_handler):
               d.getMSXAreaUnits()
 
              See also setMSXAreaUnitsFT2, setMSXAreaUnitsCM2."""
-        self.changeMSXOptions("AREA_UNITS", "M2")
+        self.msx.MSXsetoptions("AREA_UNITS", "M2")
 
     def setMSXAtol(self, value):
         """ Sets the absolute tolerance used to determine when two concentration levels of a
@@ -13102,7 +13244,7 @@ class epanet(error_handler):
               d.getMSXAtol()
 
             % See also setMSXRtol."""
-        self.changeMSXOptions("ATOL", value)
+        self.msx.MSXsetoptions("ATOL", value)
 
     def setMSXRtol(self, value):
         """Sets the relative accuracy level on a species’ concentration
@@ -13118,7 +13260,7 @@ class epanet(error_handler):
               d.getMSXRtol()
 
              See also setMSXAtol."""
-        self.changeMSXOptions("RTOL", value)
+        self.msx.MSXsetoptions("RTOL", value)
 
     def setMSXCompilerGC(self):
         """  Sets chemistry function compiler code to GC.
@@ -13131,7 +13273,7 @@ class epanet(error_handler):
               d.getMSXCompiler()
 
              See also setMSXCompilerNONE, setMSXCompilerVC."""
-        self.changeMSXOptions("COMPILER", "GC")
+        self.msx.MSXsetoptions("COMPILER", "GC")
 
     def setMSXCompilerVC(self):
         """ Sets chemistry function compiler code to VC.
@@ -13144,7 +13286,7 @@ class epanet(error_handler):
               d.getMSXCompiler()
 
              See also setMSXCompilerNONE, setMSXCompilerGC."""
-        self.changeMSXOptions("COMPILER", "VC")
+        self.msx.MSXsetoptions("COMPILER", "VC")
 
     def setMSXCompilerNONE(self):
         """ Sets chemistry function compiler code to NONE.
@@ -13157,7 +13299,7 @@ class epanet(error_handler):
               d.getMSXCompiler()
 
              See also setMSXCompilerVC, setMSXCompilerGC."""
-        self.changeMSXOptions("COMPILER", "NONE")
+        self.msx.MSXsetoptions("COMPILER", "NONE")
 
     def setMSXCouplingFULL(self):
         """  Sets coupling to FULL.
@@ -13176,7 +13318,7 @@ class epanet(error_handler):
               d.getMSXCoupling()
 
              See also setMSXCouplingNONE."""
-        self.changeMSXOptions("COUPLING", "FULL")
+        self.msx.MSXsetoptions("COUPLING", "FULL")
 
     def setMSXCouplingNONE(self):
         """ Sets coupling to NONE.
@@ -13195,7 +13337,7 @@ class epanet(error_handler):
               d.getMSXCoupling()
 
              See also setMSXCouplingFULL."""
-        self.changeMSXOptions("COUPLING", "NONE")
+        self.msx.MSXsetoptions("COUPLING", "NONE")
 
     def setMSXRateUnitsDAY(self):
         """  Sets the rate units to days.
@@ -13211,7 +13353,7 @@ class epanet(error_handler):
 
              See also setMSXRateUnitsSEC, setMSXRateUnitsMIN
                       setMSXRateUnitsHR."""
-        self.changeMSXOptions("RATE_UNITS", "DAY")
+        self.msx.MSXsetoptions("RATE_UNITS", "DAY")
 
     def setMSXRateUnitsHR(self):
         """  Sets the rate units to hours.
@@ -13227,7 +13369,7 @@ class epanet(error_handler):
 
              See also setMSXRateUnitsSEC, setMSXRateUnitsMIN
                       setMSXRateUnitsDAY."""
-        self.changeMSXOptions("RATE_UNITS", "HR")
+        self.msx.MSXsetoptions("RATE_UNITS", "HR")
 
     def setMSXRateUnitsMIN(self):
         """ Sets the rate units to minutes.
@@ -13243,7 +13385,7 @@ class epanet(error_handler):
 
              See also setMSXRateUnitsSEC, setMSXRateUnitsHR,
                       setMSXRateUnitsDAY."""
-        self.changeMSXOptions("RATE_UNITS", "MIN")
+        self.msx.MSXsetoptions("RATE_UNITS", "MIN")
 
     def setMSXRateUnitsSEC(self):
         """ Sets the rate units to seconds.
@@ -13259,7 +13401,7 @@ class epanet(error_handler):
 
              See also setMSXRateUnitsMIN, setMSXRateUnitsHR,
                       setMSXRateUnitsDAY."""
-        self.changeMSXOptions("RATE_UNITS", "SEC")
+        self.msx.MSXsetoptions("RATE_UNITS", "SEC")
 
     def setMSXSolverEUL(self):
         """ Sets the numerical integration method to solve the reaction
@@ -13275,7 +13417,7 @@ class epanet(error_handler):
               d.getMSXSolver()
 
              See also setMSXSolverRK5, setMSXSolverROS2."""
-        self.changeMSXOptions("SOLVER", "EUL")
+        self.msx.MSXsetoptions("SOLVER", "EUL")
 
     def setMSXSolverRK5(self):
         """ Sets the numerical integration method to solve the reaction
@@ -13291,7 +13433,7 @@ class epanet(error_handler):
               d.getMSXSolver()
 
             % See also setMSXSolverEUL, setMSXSolverROS2."""
-        self.changeMSXOptions("SOLVER", "RK5")
+        self.msx.MSXsetoptions("SOLVER", "RK5")
 
     def setMSXSolverROS2(self):
         """  Sets the numerical integration method to solve the reaction
@@ -13307,7 +13449,7 @@ class epanet(error_handler):
               d.getMSXSolver()
 
              See also setMSXSolverEUL, setMSXSolverRK5."""
-        self.changeMSXOptions("SOLVER", "ROS2")
+        self.msx.MSXsetoptions("SOLVER", "ROS2")
 
     def setMSXTimeStep(self, value):
         """ Sets the time step.
@@ -13322,7 +13464,7 @@ class epanet(error_handler):
               d.getMSXTimeStep()
 
              See also getMSXTimeStep."""
-        self.changeMSXOptions("TIMESTEP", value)
+        self.msx.MSXsetoptions("TIMESTEP", value)
 
     def setMSXPatternValue(self, index, patternTimeStep, patternFactor):
         """ Sets the pattern factor for an index for a specific time step.
@@ -13920,7 +14062,7 @@ class epanet(error_handler):
             f.write('LINKS ALL\n')
 
     def setMSXPatternMatrix(self, pattern_matrix):
-        """Sets all of the multiplier factors for all patterns
+        """Sets the multiplier factors for all patterns.
 
             Example:
                 inpname = os.path.join(os.getcwd(), 'epyt', 'networks','msx-examples', 'net2-cl2.inp')
@@ -13951,13 +14093,13 @@ class epanet(error_handler):
             """
         attributes = []
 
-        def recurse_attrs(obj):
+        def _recurse_attrs(obj):
             for k, v in obj.__dict__.items():
                 attributes.append((k, v))
                 if hasattr(v, '__dict__'):
-                    recurse_attrs(v)
+                    _recurse_attrs(v)
 
-        recurse_attrs(obj)
+        _recurse_attrs(obj)
         return attributes
 
     def getMethods(self):
@@ -14055,3488 +14197,1092 @@ class epanet(error_handler):
             plt.legend()
             plt.show()
 
-
-class epanetapi:
-    """
-    EPANET Toolkit functions - API
-    """
-
-    EN_MAXID = 32  # toolkit constant
-
-    def __init__(self, version=2.2, ph=False, loadlib=True, customlib=None):
-        """Load the EPANET library.
+    def setCurveType(self, index, type):
+        """
+        Purpose:
+            Sets the type of a specified curve in the EPANET model.
 
         Parameters:
-        version     EPANET version to use (currently 2.2)
-        """
-        self._lib = None
-        self.errcode = 0
-        self.inpfile = None
-        self.rptfile = None
-        self.binfile = None
-        self._ph = None
+            index (int): The index of the curve to modify.
+            (curve)type (int): The desired type of the curve, based on the following categories:
+                - 0: Volume
+                - 1: Pump
+                - 2: Efficiency
+                - 3: Headloss
+                - 4: General
+        Returns:
+            int: An error code indicating success or failure of the operation.
 
-        # Check platform and Load epanet library
-        # libname = f"epanet{str(version).replace('.', '_')}"
-        if customlib is not None:
-            if not os.path.isabs(customlib):
-                self.LibEPANET = os.path.join(os.getcwd(), customlib)
+        Example Usage:
+            inp_filename = "Net1.inp"
+
+            d = epanet(inp_filename)
+            errcode = d.setCurveType(1, 0)
+            curve_type = d.getCurveType(1)
+            if errcode == 0:
+                print("Curve type set successfully.")
             else:
-                self.LibEPANET = customlib
-            loadlib = False
-            self._lib = cdll.LoadLibrary(self.LibEPANET)
-            self.LibEPANETpath = os.path.dirname(self.LibEPANET)
-
-        if loadlib:
-            libname = f"epanet2"
-            ops = platform.system().lower()
-            if ops in ["windows"]:
-                self.LibEPANET = os.path.join(epyt_root, os.path.join("libraries", "win", f"{libname}.dll"))
-            elif ops in ["darwin"]:
-                self.LibEPANET = os.path.join(epyt_root, os.path.join("libraries", f"mac/lib{libname}.dylib"))
-            else:
-                self.LibEPANET = os.path.join(epyt_root, os.path.join("libraries", f"glnx/lib{libname}.so"))
-
-            self._lib = cdll.LoadLibrary(self.LibEPANET)
-            self.LibEPANETpath = os.path.dirname(self.LibEPANET)
-
-        if float(version) >= 2.2 and ph:
-            self._ph = c_uint64()
-
-    def ENepanet(self, inpfile="", rptfile="", binfile=""):
-        """ Runs a complete EPANET simulation
-        Parameters:
-        inpfile     Input file to use
-        rptfile     Output file to report to
-        binfile     Results file to generate
+                print(f"Error setting curve type. Error code: {d.getError(errcode)}")
         """
-        self.inpfile = inpfile.encode("utf-8")
-        self.rptfile = rptfile.encode("utf-8")
-        self.binfile = binfile.encode("utf-8")
-        self.errcode = self._lib.ENepanet(self.inpfile, self.rptfile, self.binfile, c_void_p())
-        self.ENgeterror()
+        errcode = self.api.ENsetcurvetype(index, type)
+        return errcode
 
-    def ENaddcontrol(self, conttype, lindex, setting, nindex, level):
-        """ Adds a new simple control to a project.
-
-        ENaddcontrol(ctype, lindex, setting, nindex, level)
+    def setCurveTypeVolume(self, index):
+        """Purpose:
+            Sets the type of a curve to Volume in the EPANET model.
 
         Parameters:
-        conttype    the type of control to add (see ControlTypes).
-        lindex      the index of a link to control (starting from 1).
-        setting     control setting applied to the link.
-        nindex      index of the node used to control the link (0 for EN_TIMER and EN_TIMEOFDAY controls).
-        level       action level (tank level, junction pressure, or time in seconds) that triggers the control.
+            index (int): The index of the curve to modify.
 
         Returns:
-        cindex 	index of the new control.
-        """
-        index = c_int()
-        if self._ph is not None:
-            self.errcode = self._lib.EN_addcontrol(self._ph, conttype, int(lindex), c_double(setting), nindex,
-                                                   c_double(level), byref(index))
-        else:
-            self.errcode = self._lib.ENaddcontrol(conttype, int(lindex), c_float(setting), nindex,
-                                                  c_float(level), byref(index))
-        self.ENgeterror()
-        return index.value
+            int: An error code indicating success or failure of the operation.
 
-    def ENaddcurve(self, cid):
-        """ Adds a new data curve to a project.
+        Example Usage:
+            inp_filename = "Net1.inp"
 
+            d = epanet(inp_filename)
+            errcode = d.setCurveTypeVolume(1)
+            curve_type = d.getCurveType(1)
+            """
+        errcode = self.api.ENsetcurvetype(index, self.ToolkitConstants.EN_VOLUME_CURVE)
+        return errcode
 
-        ENaddcurve(cid)
+    def setCurveTypePump(self, index):
+        """Purpose:
+            Sets the type of a curve to Pump in the EPANET model.
 
         Parameters:
-        cid        The ID name of the curve to be added.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___curves.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_addcurve(self._ph, cid.encode('utf-8'))
-        else:
-            self.errcode = self._lib.ENaddcurve(cid.encode('utf-8'))
-
-        self.ENgeterror()
-
-    def ENadddemand(self, nodeIndex, baseDemand, demandPattern, demandName):
-        """ Appends a new demand to a junction node demands list.
-
-        ENadddemand(nodeIndex, baseDemand, demandPattern, demandName)
-
-        Parameters:
-        nodeIndex        the index of a node (starting from 1).
-        baseDemand       the demand's base value.
-        demandPattern    the name of a time pattern used by the demand.
-        demandName       the name of the demand's category.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___demands.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_adddemand(self._ph, int(nodeIndex), c_double(baseDemand),
-                                                  demandPattern.encode("utf-8"),
-                                                  demandName.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENadddemand(int(nodeIndex), c_float(baseDemand),
-                                                 demandPattern.encode("utf-8"),
-                                                 demandName.encode("utf-8"))
-
-        self.ENgeterror()
-        return
-
-    def ENaddlink(self, linkid, linktype, fromnode, tonode):
-        """ Adds a new link to a project.
-
-        ENaddlink(linkid, linktype, fromnode, tonode)
-
-        Parameters:
-        linkid        The ID name of the link to be added.
-        linktype      The type of link being added (see EN_LinkType, self.LinkType).
-        fromnode      The ID name of the link's starting node.
-        tonode        The ID name of the link's ending node.
+            index (int): The index of the curve to modify.
 
         Returns:
-        index the index of the newly added link.
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___links.html
-        """
-        index = c_int()
+            int: An error code indicating success or failure of the operation.
 
-        if self._ph is not None:
-            self.errcode = self._lib.EN_addlink(self._ph, linkid.encode('utf-8'), linktype,
-                                                fromnode.encode('utf-8'), tonode.encode('utf-8'), byref(index))
-        else:
-            self.errcode = self._lib.ENaddlink(linkid.encode('utf-8'), linktype,
-                                               fromnode.encode('utf-8'), tonode.encode('utf-8'), byref(index))
-        self.ENgeterror()
-        return index.value
+        Example Usage:
+            inp_filename = "Net1.inp"
 
-    def ENaddnode(self, nodeid, nodetype):
-        """ Adds a new node to a project.
+            d = epanet(inp_filename)
+            errcode = d.setCurveTypePump(1)
+            curve_type = d.getCurveType(1)
+            """
+        errcode = self.api.ENsetcurvetype(index, self.ToolkitConstants.EN_PUMP_CURVE)
+        return errcode
 
-        ENaddnode(nodeid, nodetype)
+    def setCurveTypeEfficiency(self, index):
+        """Purpose:
+            Sets the type of curve to Efficiency in the EPANET model.
 
         Parameters:
-        nodeid       the ID name of the node to be added.
-        nodetype     the type of node being added (see EN_NodeType).
+            index (int): The index of the curve to modify.
 
         Returns:
-        index    the index of the newly added node.
-        See also EN_NodeProperty, NodeType
-        """
-        index = c_int()
+            int: An error code indicating success or failure of the operation.
 
-        if self._ph is not None:
-            self.errcode = self._lib.EN_addnode(self._ph, nodeid.encode("utf-8"), nodetype, byref(index))
-        else:
-            self.errcode = self._lib.ENaddnode(nodeid.encode("utf-8"), nodetype, byref(index))
+        Example Usage:
+            inp_filename = "Net1.inp"
 
-        self.ENgeterror()
-        return index.value
+            d = epanet(inp_filename)
+            errcode = d.setCurveTypeEfficiency(1)
+            curve_type = d.getCurveType(1)
+            """
+        errcode = self.api.ENsetcurvetype(index, self.ToolkitConstants.EN_EFFIC_CURVE)
+        return errcode
 
-    def ENaddpattern(self, patid):
-        """ Adds a new time pattern to a project.
-
-        ENaddpattern(patid)
+    def setCurveTypeHeadloss(self, index):
+        """Purpose:
+            Sets the type of a curve to Headloss in the EPANET model.
 
         Parameters:
-        patid      the ID name of the pattern to add.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___patterns.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_addpattern(self._ph, patid.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENaddpattern(patid.encode("utf-8"))
-
-        self.ENgeterror()
-        return
-
-    def ENaddrule(self, rule):
-        """ Adds a new rule-based control to a project.
-
-
-        ENaddrule(rule)
-
-        Parameters:
-        rule        text of the rule following the format used in an EPANET input file.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___rules.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_addrule(self._ph, rule.encode('utf-8'))
-        else:
-            self.errcode = self._lib.ENaddrule(rule.encode('utf-8'))
-
-        self.ENgeterror()
-
-    def ENclearreport(self):
-        """ Clears the contents of a project's report file.
-
-
-        ENclearreport()
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_clearreport(self._ph)
-        else:
-            self.errcode = self._lib.ENclearreport()
-
-        self.ENgeterror()
-
-    def ENclose(self):
-        """ Closes a project and frees all of its memory.
-
-        ENclose()
-
-        See also ENopen
-        """
-        if self._ph is not None:
-            self.errcode = self._lib.EN_close(self._ph)
-            self._ph = c_uint64()
-        else:
-            self.errcode = self._lib.ENclose()
-
-        self.ENgeterror()
-
-    def ENcloseH(self):
-        """ Closes the hydraulic solver freeing all of its allocated memory.
-
-        ENcloseH()
-
-        See also  ENinitH, ENrunH, ENnextH
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_closeH(self._ph)
-        else:
-            self.errcode = self._lib.ENcloseH()
-
-        self.ENgeterror()
-        return
-
-    def ENcloseQ(self):
-        """ Closes the water quality solver, freeing all of its allocated memory.
-
-        ENcloseQ()
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___quality.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_closeQ(self._ph)
-        else:
-            self.errcode = self._lib.ENcloseQ()
-
-        self.ENgeterror()
-        return
-
-    def ENcopyreport(self, filename):
-        """ Copies the current contents of a project's report file to another file.
-
-
-        ENcopyreport(filename)
-
-        Parameters:
-        filename  the full path name of the destination file
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_copyreport(self._ph, filename.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENcopyreport(filename.encode("utf-8"))
-
-        self.ENgeterror()
-
-    def ENcreateproject(self):
-        """ Copies the current contents of a project's report file to another file.
-        *** ENcreateproject must be called before any other API functions are used. ***
-        ENcreateproject()
-
-        Parameters:
-        ph	an EPANET project handle that is passed into all other API functions.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_createproject(byref(self._ph))
-
-        self.ENgeterror()
-        return
-
-    def ENdeletecontrol(self, index):
-        """ Deletes an existing simple control.
-
-
-        ENdeletecontrol(index)
-
-        Parameters:
-        index       the index of the control to delete (starting from 1).
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_deletecontrol(self._ph, int(index))
-        else:
-            self.errcode = self._lib.ENdeletecontrol(int(index))
-
-        self.ENgeterror()
-
-    def ENdeletecurve(self, indexCurve):
-        """ Deletes a data curve from a project.
-
-
-        ENdeletecurve(indexCurve)
-
-        Parameters:
-        indexCurve  The ID name of the curve to be added.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_deletecurve(self._ph, int(indexCurve))
-        else:
-            self.errcode = self._lib.ENdeletecurve(int(indexCurve))
-
-        self.ENgeterror()
-
-    def ENdeletedemand(self, nodeIndex, demandIndex):
-        """ Deletes a demand from a junction node.
-
-        ENdeletedemand(nodeIndex, demandInde)
-
-        Parameters:
-        nodeIndex        the index of a node (starting from 1).
-        demandIndex      the position of the demand in the node's demands list (starting from 1).
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_deletedemand(self._ph, int(nodeIndex), demandIndex)
-        else:
-            self.errcode = self._lib.ENdeletedemand(int(nodeIndex), demandIndex)
-
-        self.ENgeterror()
-
-    def ENdeletelink(self, indexLink, condition):
-        """ Deletes a link from the project.
-
-        ENdeletelink(indexLink, condition)
-
-        Parameters:
-        indexLink      the index of the link to be deleted.
-        condition      The action taken if any control contains the link.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___links.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_deletelink(self._ph, int(indexLink), condition)
-        else:
-            self.errcode = self._lib.ENdeletelink(int(indexLink), condition)
-
-        self.ENgeterror()
-
-    def ENdeletenode(self, indexNode, condition):
-        """ Deletes a node from a project.
-
-        ENdeletenode(indexNode, condition)
-
-        Parameters:
-        indexNode    the index of the node to be deleted.
-        condition    	the action taken if any control contains the node and its links.
-
-        See also EN_NodeProperty, NodeType
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___nodes.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_deletenode(self._ph, int(indexNode), condition)
-        else:
-            self.errcode = self._lib.ENdeletenode(int(indexNode), condition)
-
-        self.ENgeterror()
-
-    def ENdeletepattern(self, indexPat):
-        """ Deletes a time pattern from a project.
-
-
-        ENdeletepattern(indexPat)
-
-        Parameters:
-        indexPat   the time pattern's index (starting from 1).
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_deletepattern(self._ph, int(indexPat))
-        else:
-            self.errcode = self._lib.ENdeletepattern(int(indexPat))
-
-        self.ENgeterror()
-
-    def ENdeleteproject(self):
-        """ Deletes an EPANET project.
-        *** EN_deleteproject should be called after all network analysis has been completed. ***
-        ENdeleteproject()
-
-        Parameters:
-        ph	an EPANET project handle which is returned as NULL.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_deleteproject(self._ph)
-
-        self.ENgeterror()
-        return
-
-    def ENdeleterule(self, index):
-        """ Deletes an existing rule-based control.
-
-
-        ENdeleterule(index)
-
-        Parameters:
-        index       the index of the rule to be deleted (starting from 1).
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_deleterule(self._ph, int(index))
-        else:
-            self.errcode = self._lib.ENdeleterule(int(index))
-
-        self.ENgeterror()
-
-    def ENgetaveragepatternvalue(self, index):
-        """ Retrieves the average of all pattern factors in a time pattern.
-
-
-        ENgetaveragepatternvalue(index)
-
-        Parameters:
-        index      a time pattern index (starting from 1).
+            index (int): The index of the curve to modify.
 
         Returns:
-        value The average of all of the time pattern's factors.
-        """
+            int: An error code indicating success or failure of the operation.
 
-        if self._ph is not None:
-            value = c_double()
-            self.errcode = self._lib.EN_getaveragepatternvalue(self._ph, int(index), byref(value))
-        else:
-            value = c_float()
-            self.errcode = self._lib.ENgetaveragepatternvalue(int(index), byref(value))
+        Example Usage:
+            inp_filename = "Net1.inp"
 
-        self.ENgeterror()
-        return value.value
+            d = epanet(inp_filename)
+            errcode = d.setCurveTypeHeadloss(1)
+            curve_type = d.getCurveType(1)
+            """
+        errcode = self.api.ENsetcurvetype(index, self.ToolkitConstants.EN_HLOSS_CURVE)
+        return errcode
 
-    def ENgetbasedemand(self, index, numdemands):
-        """ Gets the base demand for one of a node's demand categories.
-        EPANET 20100
-
-        ENgetbasedemand(index, numdemands)
+    def setCurveTypeGeneral(self, index):
+        """Purpose:
+            Sets the type of a curve to general in the EPANET model.
 
         Parameters:
-        index        a node's index (starting from 1).
-        numdemands   the index of a demand category for the node (starting from 1).
+            index (int): The index of the curve to modify.
 
         Returns:
-        value  the category's base demand.
-        """
-
-        if self._ph is not None:
-            bDem = c_double()
-            self.errcode = self._lib.EN_getbasedemand(self._ph, int(index), numdemands, byref(bDem))
-        else:
-            bDem = c_float()
-            self.errcode = self._lib.ENgetbasedemand(int(index), numdemands, byref(bDem))
-
-        self.ENgeterror()
-        return bDem.value
-
-    def ENgetcomment(self, object_, index):
-        """ Retrieves the comment of a specific index of a type object.
-
-
-        ENgetcomment(object, index, comment)
-
-        Parameters:
-        object_    a type of object (either EN_NODE, EN_LINK, EN_TIMEPAT or EN_CURVE)
-                   e.g, self.ToolkitConstants.EN_NODE
-        index      object's index (starting from 1).
-
-        Returns:
-        out_comment  the comment string assigned to the object.
-        """
-        out_comment = create_string_buffer(80)
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getcomment(self._ph, object_, int(index), byref(out_comment))
-        else:
-            self.errcode = self._lib.ENgetcomment(object_, int(index), byref(out_comment))
-
-        self.ENgeterror()
-        return out_comment.value.decode()
-
-    def ENgetcontrol(self, cindex):
-        """ Retrieves the properties of a simple control.
-
-        ENgetcontrol(cindex)
-
-        Parameters:
-        cindex      the control's index (starting from 1).
-
-        Returns:
-        ctype   the type of control (see ControlTypes).
-        lindex  the index of the link being controlled.
-        setting the control setting applied to the link.
-        nindex  the index of the node used to trigger the control (0 for EN_TIMER and EN_TIMEOFDAY controls).
-        level   the action level (tank level, junction pressure, or time in seconds) that triggers the control.
-        """
-        ctype = c_int()
-        lindex = c_int()
-        nindex = c_int()
-
-        if self._ph is not None:
-            setting = c_double()
-            level = c_double()
-            self.errcode = self._lib.EN_getcontrol(self._ph, int(cindex), byref(ctype), byref(lindex),
-                                                   byref(setting), byref(nindex), byref(level))
-        else:
-            setting = c_float()
-            level = c_float()
-            self.errcode = self._lib.ENgetcontrol(int(cindex), byref(ctype), byref(lindex),
-                                                  byref(setting), byref(nindex), byref(level))
-
-        self.ENgeterror()
-        return [ctype.value, lindex.value, setting.value, nindex.value, level.value]
-
-    def ENgetcoord(self, index):
-        """ Gets the (x,y) coordinates of a node.
-
-
-        ENgetcoord(index)
-
-        Parameters:
-        index      a node index (starting from 1).
-
-        Returns:
-        x 	the node's X-coordinate value.
-        y   the node's Y-coordinate value.
-        """
-        x = c_double()
-        y = c_double()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getcoord(self._ph, int(index), byref(x), byref(y))
-        else:
-            self.errcode = self._lib.ENgetcoord(int(index), byref(x), byref(y))
-
-        self.ENgeterror()
-        return [x.value, y.value]
-
-    def ENgetcount(self, countcode):
-        """ Retrieves the number of objects of a given type in a project.
-
-        ENgetcount(countcode)
-
-        Parameters:
-        countcode	number of objects of the specified type
-
-        Returns:
-        count	number of objects of the specified type
-        """
-        count = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getcount(self._ph, countcode, byref(count))
-        else:
-            self.errcode = self._lib.ENgetcount(countcode, byref(count))
-
-        self.ENgeterror()
-        return count.value
-
-    def ENgetcurve(self, index):
-        """ Retrieves all of a curve's data.
-
-        ENgetcurve(index)
-
-        Parameters:
-        index         a curve's index (starting from 1).
-
-        out_id	 the curve's ID name
-        nPoints	 the number of data points on the curve.
-        xValues	 the curve's x-values.
-        yValues	 the curve's y-values.
-
-        See also ENgetcurvevalue
-        """
-        out_id = create_string_buffer(self.EN_MAXID)
-        nPoints = c_int()
-        if self._ph is not None:
-            xValues = (c_double * self.ENgetcurvelen(index))()
-            yValues = (c_double * self.ENgetcurvelen(index))()
-            self.errcode = self._lib.EN_getcurve(self._ph, index, byref(out_id), byref(nPoints),
-                                                 byref(xValues), byref(yValues))
-        else:
-            xValues = (c_float * self.ENgetcurvelen(index))()
-            yValues = (c_float * self.ENgetcurvelen(index))()
-            self.errcode = self._lib.ENgetcurve(index, byref(out_id), byref(nPoints),
-                                                byref(xValues), byref(yValues))
-
-        self.ENgeterror()
-        curve_attr = {}
-        curve_attr['id'] = out_id.value.decode()
-        curve_attr['nPoints'] = nPoints.value
-        curve_attr['x'] = []
-        curve_attr['y'] = []
-        for i in range(len(xValues)):
-            curve_attr['x'].append(xValues[i])
-            curve_attr['y'].append(yValues[i])
-        return curve_attr
-
-    def ENgetcurveid(self, index):
-        """ Retrieves the ID name of a curve given its index.
-
-
-        ENgetcurveid(index)
-
-        Parameters:
-        index       a curve's index (starting from 1).
-
-        Returns:
-        Id	the curve's ID name
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___curves.html
-        """
-        Id = create_string_buffer(self.EN_MAXID)
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getcurveid(self._ph, int(index), byref(Id))
-        else:
-            self.errcode = self._lib.ENgetcurveid(int(index), byref(Id))
-
-        self.ENgeterror()
-        return Id.value.decode()
-
-    def ENgetcurveindex(self, Id):
-        """ Retrieves the index of a curve given its ID name.
-
-
-        ENgetcurveindex(Id)
-
-        Parameters:
-        Id          the ID name of a curve.
-
-        Returns:
-        index   The curve's index (starting from 1).
-        """
-        index = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getcurveindex(self._ph, Id.encode("utf-8"), byref(index))
-        else:
-            self.errcode = self._lib.ENgetcurveindex(Id.encode("utf-8"), byref(index))
-
-        self.ENgeterror()
-        return index.value
-
-    def ENgetcurvelen(self, index):
-        """ Retrieves the number of points in a curve.
-
-
-        ENgetcurvelen(index)
-
-        Parameters:
-        index       a curve's index (starting from 1).
-
-        Returns:
-        len  The number of data points assigned to the curve.
-        """
-        length = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getcurvelen(self._ph, int(index), byref(length))
-        else:
-            self.errcode = self._lib.ENgetcurvelen(int(index), byref(length))
-
-        self.ENgeterror()
-        return length.value
-
-    def ENgetcurvetype(self, index):
-        """ Retrieves a curve's type.
-
-
-        ENgetcurvetype(index)
-
-        Parameters:
-        index       a curve's index (starting from 1).
-
-        Returns:
-        type_  The curve's type (see EN_CurveType).
-        """
-        type_ = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getcurvetype(self._ph, int(index), byref(type_))
-        else:
-            self.errcode = self._lib.ENgetcurvetype(int(index), byref(type_))
-
-        self.ENgeterror()
-        return type_.value
-
-    def ENgetcurvevalue(self, index, period):
-        """ Retrieves the value of a single data point for a curve.
-
-
-        ENgetcurvevalue(index, period)
-
-        Parameters:
-        index       a curve's index (starting from 1).
-        period      the index of a point on the curve (starting from 1).
-
-        Returns:
-        x  the point's x-value.
-        y  the point's y-value.
-        """
-        if self._ph is not None:
-            x = c_double()
-            y = c_double()
-            self.errcode = self._lib.EN_getcurvevalue(self._ph, int(index), period, byref(x), byref(y))
-        else:
-            x = c_float()
-            y = c_float()
-            self.errcode = self._lib.ENgetcurvevalue(int(index), period, byref(x), byref(y))
-
-        self.ENgeterror()
-        return [x.value, y.value]
-
-    def ENgetdemandindex(self, nodeindex, demandName):
-        """ Retrieves the index of a node's named demand category.
-
-
-        ENgetdemandindex(nodeindex, demandName)
-
-        Parameters:
-        nodeindex    the index of a node (starting from 1).
-        demandName   the name of a demand category for the node.
-
-        Returns:
-        demandIndex  the index of the demand being sought.
-        """
-        demandIndex = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getdemandindex(self._ph, int(nodeindex), demandName.encode('utf-8'),
-                                                       byref(demandIndex))
-        else:
-            self.errcode = self._lib.ENgetdemandindex(int(nodeindex), demandName.encode('utf-8'),
-                                                      byref(demandIndex))
-
-        self.ENgeterror()
-        return demandIndex.value
-
-    def ENgetdemandmodel(self):
-        """ Retrieves the type of demand model in use and its parameters.
-
-
-        ENgetdemandmodel()
-
-        Returns:
-        Type  Type of demand model (see EN_DemandModel).
-        pmin  Pressure below which there is no demand.
-        preq  Pressure required to deliver full demand.
-        pexp  Pressure exponent in demand function.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___demands.html
-        """
-        Type = c_int()
-        if self._ph is not None:
-            pmin = c_double()
-            preq = c_double()
-            pexp = c_double()
-            self.errcode = self._lib.EN_getdemandmodel(self._ph, byref(Type), byref(pmin),
-                                                       byref(preq), byref(pexp))
-        else:
-            pmin = c_float()
-            preq = c_float()
-            pexp = c_float()
-            self.errcode = self._lib.ENgetdemandmodel(byref(Type), byref(pmin),
-                                                      byref(preq), byref(pexp))
-
-        self.ENgeterror()
-        return [Type.value, pmin.value, preq.value, pexp.value]
-
-    def ENgetdemandname(self, node_index, demand_index):
-        """ Retrieves the name of a node's demand category.
-
-
-        ENgetdemandname(node_index, demand_index)
-
-        Parameters:
-        node_index    	a node's index (starting from 1).
-        demand_index    the index of one of the node's demand categories (starting from 1).
-
-        Returns:
-        demand_name  The name of the selected category.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___demands.html
-        """
-
-        if self._ph is not None:
-            demand_name = create_string_buffer(100)
-            self.errcode = self._lib.EN_getdemandname(self._ph, int(node_index), int(demand_index),
-                                                      byref(demand_name))
-        else:
-            demand_name = create_string_buffer(80)
-            self.errcode = self._lib.ENgetdemandname(int(node_index), int(demand_index),
-                                                     byref(demand_name))
-
-        self.ENgeterror()
-        return demand_name.value.decode()
-
-    def ENgetdemandpattern(self, index, numdemands):
-        """ Retrieves the index of a time pattern assigned to one of a node's demand categories.
-        EPANET 20100
-        ENgetdemandpattern(index, numdemands)
-
-        Parameters:
-        index    	 the node's index (starting from 1).
-        numdemands   the index of a demand category for the node (starting from 1).
-
-        Returns:
-        value  the index of the category's time pattern.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___demands.html
-        """
-        patIndex = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getdemandpattern(self._ph, int(index), numdemands, byref(patIndex))
-        else:
-            self.errcode = self._lib.ENgetdemandpattern(int(index), numdemands, byref(patIndex))
-
-        self.ENgeterror()
-        return patIndex.value
-
-    def ENgetelseaction(self, ruleIndex, actionIndex):
-        """ Gets the properties of an ELSE action in a rule-based control.
-
-
-        ENgetelseaction(ruleIndex, actionIndex)
-
-        Parameters:
-        ruleIndex   	the rule's index (starting from 1).
-        actionIndex   the index of the ELSE action to retrieve (starting from 1).
-
-        Returns:
-        linkIndex  the index of the link sin the action.
-        status     the status assigned to the link (see RULESTATUS).
-        setting    the value assigned to the link's setting.
-        """
-        linkIndex = c_int()
-        status = c_int()
-
-        if self._ph is not None:
-            setting = c_double()
-            self.errcode = self._lib.EN_getelseaction(self._ph, int(ruleIndex), int(actionIndex),
-                                                      byref(linkIndex),
-                                                      byref(status), byref(setting))
-        else:
-            setting = c_float()
-            self.errcode = self._lib.ENgetelseaction(int(ruleIndex), int(actionIndex),
-                                                     byref(linkIndex),
-                                                     byref(status), byref(setting))
-
-        self.ENgeterror()
-        return [linkIndex.value, status.value, setting.value]
-
-    def ENgeterror(self, errcode=0):
-        """ Returns the text of an error message generated by an error code, as warning.
-
-        ENgeterror()
-
-        """
-        if self.errcode or errcode:
-            if errcode:
-                self.errcode = errcode
-            errmssg = create_string_buffer(150)
-            self._lib.ENgeterror(self.errcode, byref(errmssg), 150)
-            return errmssg.value.decode()
-
-    def ENgetflowunits(self):
-        """ Retrieves a project's flow units.
-
-        ENgetflowunits()
-
-        Returns:
-        flowunitsindex a flow units code.
-        """
-        flowunitsindex = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getflowunits(self._ph, byref(flowunitsindex))
-        else:
-            self.errcode = self._lib.ENgetflowunits(byref(flowunitsindex))
-
-        self.ENgeterror()
-        return flowunitsindex.value
-
-    def ENgetheadcurveindex(self, pumpindex):
-        """ Retrieves the curve assigned to a pump's head curve.
-
-
-        ENgetheadcurveindex(pumpindex)
-
-        Parameters:
-        pumpindex      the index of a pump link (starting from 1).
-
-        Returns:
-        value   the index of the curve assigned to the pump's head curve.
-        """
-        value = c_long()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getheadcurveindex(self._ph, int(pumpindex), byref(value))
-        else:
-            self.errcode = self._lib.ENgetheadcurveindex(int(pumpindex), byref(value))
-
-        self.ENgeterror()
-        return value.value
-
-    def ENgetlinkid(self, index):
-        """ Gets the ID name of a link given its index.
-
-        ENgetlinkid(index)
-
-        Parameters:
-        index      	a link's index (starting from 1).
-
-        Returns:
-        id   The link's ID name.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___links.html
-        """
-        nameID = create_string_buffer(self.EN_MAXID)
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getlinkid(self._ph, int(index), byref(nameID))
-        else:
-            self.errcode = self._lib.ENgetlinkid(int(index), byref(nameID))
-
-        self.ENgeterror()
-        return nameID.value.decode()
-
-    def ENgetlinkindex(self, Id):
-        """ Gets the index of a link given its ID name.
-
-        ENgetlinkindex(Id)
-
-        Parameters:
-        Id      	  a link's ID name.
-
-        Returns:
-        index   the link's index (starting from 1).
-        """
-        index = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getlinkindex(self._ph, Id.encode("utf-8"), byref(index))
-        else:
-            self.errcode = self._lib.ENgetlinkindex(Id.encode("utf-8"), byref(index))
-
-        self.ENgeterror()
-        return index.value
-
-    def ENgetlinknodes(self, index):
-        """ Gets the indexes of a link's start- and end-nodes.
-
-        ENgetlinknodes(index)
-
-        Parameters:
-        index      	a link's index (starting from 1).
-
-        Returns:
-        from   the index of the link's start node (starting from 1).
-        to     the index of the link's end node (starting from 1).
-        """
-        fromNode = c_int()
-        toNode = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getlinknodes(self._ph, int(index), byref(fromNode), byref(toNode))
-        else:
-            self.errcode = self._lib.ENgetlinknodes(int(index), byref(fromNode), byref(toNode))
-
-        self.ENgeterror()
-        return [fromNode.value, toNode.value]
-
-    def ENgetlinktype(self, index):
-        """ Retrieves a link's type.
-
-        ENgetlinktype(index)
-
-        Parameters:
-        index      	a link's index (starting from 1).
-
-        Returns:
-        typecode   the link's type (see LinkType).
-        """
-        code_p = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getlinktype(self._ph, int(index), byref(code_p))
-        else:
-            self.errcode = self._lib.ENgetlinktype(int(index), byref(code_p))
-
-        self.ENgeterror()
-        if code_p.value != -1:
-            return code_p.value
-        else:
-            return sys.maxsize
-
-    def ENgetlinkvalue(self, index, paramcode):
-        """ Retrieves a property value for a link.
-
-        ENgetlinkvalue(index, paramcode)
-
-        Parameters:
-        index      	a link's index (starting from 1).
-        paramcode   the property to retrieve (see EN_LinkProperty).
-
-        Returns:
-        value   the current value of the property.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___links.html
-        """
-
-        if self._ph is not None:
-            fValue = c_double()
-            self.errcode = self._lib.EN_getlinkvalue(self._ph, int(index), paramcode, byref(fValue))
-        else:
-            fValue = c_float()
-            self.errcode = self._lib.ENgetlinkvalue(int(index), paramcode, byref(fValue))
-
-        self.ENgeterror()
-        return fValue.value
-
-    def ENgetnodeid(self, index):
-        """ Gets the ID name of a node given its index
-
-        ENgetnodeid(index)
-
-        Parameters:
-        index  nodes index
-
-        Returns:
-        nameID nodes id
-        """
-        nameID = create_string_buffer(self.EN_MAXID)
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getnodeid(self._ph, int(index), byref(nameID))
-        else:
-            self.errcode = self._lib.ENgetnodeid(int(index), byref(nameID))
-
-        self.ENgeterror()
-        return nameID.value.decode()
-
-    def ENgetnodeindex(self, Id):
-        """ Gets the index of a node given its ID name.
-
-        ENgetnodeindex(Id)
-
-        Parameters:
-        Id      	 a node ID name.
-
-        Returns:
-        index  the node's index (starting from 1).
-        """
-        index = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getnodeindex(self._ph, Id.encode("utf-8"), byref(index))
-        else:
-            self.errcode = self._lib.ENgetnodeindex(Id.encode("utf-8"), byref(index))
-
-        self.ENgeterror()
-        return index.value
-
-    def ENgetnodetype(self, index):
-        """ Retrieves a node's type given its index.
-
-        ENgetnodetype(index)
-
-        Parameters:
-        index      a node's index (starting from 1).
-
-        Returns:
-        type the node's type (see NodeType).
-        """
-        code_p = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getnodetype(self._ph, int(index), byref(code_p))
-        else:
-            self.errcode = self._lib.ENgetnodetype(int(index), byref(code_p))
-
-        self.ENgeterror()
-        return code_p.value
-
-    def ENgetnodevalue(self, index, code_p):
-        """ Retrieves a property value for a node.
-
-        ENgetnodevalue(index, paramcode)
-
-        Parameters:
-        index      a node's index.
-        paramcode  the property to retrieve (see EN_NodeProperty, self.getToolkitConstants).
-
-        Returns:
-        value the current value of the property.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___nodes.html
-        """
-        if self._ph is not None:
-            fValue = c_double()
-            self.errcode = self._lib.EN_getnodevalue(self._ph, int(index), code_p, byref(fValue))
-        else:
-            fValue = c_float()
-            self.errcode = self._lib.ENgetnodevalue(int(index), code_p, byref(fValue))
-
-        if self.errcode == 240:
-            self.errcode = 0
-            return None
-        else:
-            self.ENgeterror()
-            return fValue.value
-
-    def ENgetnumdemands(self, index):
-        """ Retrieves the number of demand categories for a junction node.
-        EPANET 20100
-
-        ENgetnumdemands(index)
-
-        Parameters:
-        index    	   the index of a node (starting from 1).
-
-        Returns:
-        value  the number of demand categories assigned to the node.
-        """
-        numDemands = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getnumdemands(self._ph, int(index), byref(numDemands))
-        else:
-            self.errcode = self._lib.ENgetnumdemands(int(index), byref(numDemands))
-
-        self.ENgeterror()
-        return numDemands.value
-
-    def ENgetoption(self, optioncode):
-        """ Retrieves the value of an analysis option.
-
-        ENgetoption(optioncode)
-
-        Parameters:
-        optioncode   a type of analysis option (see EN_Option).
-
-        Returns:
-        value the current value of the option.
-        """
-        if self._ph is not None:
-            value = c_double()
-            self.errcode = self._lib.EN_getoption(self._ph, optioncode, byref(value))
-        else:
-            value = c_float()
-            self.errcode = self._lib.ENgetoption(optioncode, byref(value))
-
-        self.ENgeterror()
-        return value.value
-
-    def ENgetpatternid(self, index):
-        """ Retrieves the ID name of a time pattern given its index.
-
-        ENgetpatternid(index)
-
-        Parameters:
-        index      a time pattern index (starting from 1).
-
-        Returns:
-        id   the time pattern's ID name.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___patterns.html
-        """
-        nameID = create_string_buffer(self.EN_MAXID)
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getpatternid(self._ph, int(index), byref(nameID))
-        else:
-            self.errcode = self._lib.ENgetpatternid(int(index), byref(nameID))
-
-        self.ENgeterror()
-        return nameID.value.decode()
-
-    def ENgetpatternindex(self, Id):
-        """ Retrieves the index of a time pattern given its ID name.
-
-        ENgetpatternindex(id)
-
-        Parameters:
-        id         the ID name of a time pattern.
-
-        Returns:
-        index   the time pattern's index (starting from 1).
-        """
-        index = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getpatternindex(self._ph, Id.encode("utf-8"), byref(index))
-        else:
-            self.errcode = self._lib.ENgetpatternindex(Id.encode("utf-8"), byref(index))
-
-        self.ENgeterror()
-        return index.value
-
-    def ENgetpatternlen(self, index):
-        """ Retrieves the number of time periods in a time pattern.
-
-        ENgetpatternlen(index)
-
-        Parameters:
-        index      a time pattern index (starting from 1).
-
-        Returns:
-        leng   the number of time periods in the pattern.
-        """
-        leng = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getpatternlen(self._ph, int(index), byref(leng))
-        else:
-            self.errcode = self._lib.ENgetpatternlen(int(index), byref(leng))
-
-        self.ENgeterror()
-        return leng.value
-
-    def ENgetpatternvalue(self, index, period):
-        """ Retrieves a time pattern's factor for a given time period.
-
-        ENgetpatternvalue(index, period)
-
-        Parameters:
-        index      a time pattern index (starting from 1).
-        period     a time period in the pattern (starting from 1).
-
-        Returns:
-        value   the pattern factor for the given time period.
-        """
-        if self._ph is not None:
-            value = c_double()
-            self.errcode = self._lib.EN_getpatternvalue(self._ph, int(index), period, byref(value))
-        else:
-            value = c_float()
-            self.errcode = self._lib.ENgetpatternvalue(int(index), period, byref(value))
-
-        self.ENgeterror()
-        return value.value
-
-    def ENgetpremise(self, ruleIndex, premiseIndex):
-        """ Gets the properties of a premise in a rule-based control.
-
-
-        ENgetpremise(ruleIndex, premiseIndex)
-
-        Parameters:
-        ruleIndex   	 the rule's index (starting from 1).
-        premiseIndex   the position of the premise in the rule's list of premises (starting from 1).
-
-        Returns:
-        logop       the premise's logical operator ( IF = 1, AND = 2, OR = 3 ).
-        object_     the status assigned to the link (see RULEOBJECT).
-        objIndex    the index of the object (e.g. the index of a tank).
-        variable    the object's variable being compared (see RULEVARIABLE).
-        relop       the premise's comparison operator (see RULEOPERATOR).
-        status      the status that the object's status is compared to (see RULESTATUS).
-        value       the value that the object's variable is compared to.
-        """
-        logop = c_int()
-        object_ = c_int()
-        objIndex = c_int()
-        variable = c_int()
-        relop = c_int()
-        status = c_int()
-
-        if self._ph is not None:
-            value = c_double()
-            self.errcode = self._lib.EN_getpremise(self._ph, int(ruleIndex), int(premiseIndex), byref(logop),
-                                                   byref(object_), byref(objIndex),
-                                                   byref(variable), byref(relop), byref(status),
-                                                   byref(value))
-        else:
-            value = c_float()
-            self.errcode = self._lib.ENgetpremise(int(ruleIndex), int(premiseIndex), byref(logop),
-                                                  byref(object_), byref(objIndex),
-                                                  byref(variable), byref(relop), byref(status),
-                                                  byref(value))
-
-        self.ENgeterror()
-        return [logop.value, object_.value, objIndex.value, variable.value, relop.value, status.value, value.value]
-
-    def ENgetpumptype(self, index):
-        """ Retrieves the type of head curve used by a pump.
-
-
-        ENgetpumptype(pumpindex)
-
-        Parameters:
-        pumpindex   the index of a pump link (starting from 1).
-
-        Returns:
-        value   the type of head curve used by the pump (see EN_PumpType).
-        """
-        code_p = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getpumptype(self._ph, int(index), byref(code_p))
-        else:
-            self.errcode = self._lib.ENgetpumptype(int(index), byref(code_p))
-
-        self.ENgeterror()
-        return code_p.value
-
-    def ENgetqualinfo(self):
-        """ Gets information about the type of water quality analysis requested.
-
-        ENgetqualinfo()
-
-        Returns:
-        qualType    type of analysis to run (see self.QualityType).
-        chemname    name of chemical constituent.
-        chemunits   concentration units of the constituent.
-        tracenode 	index of the node being traced (if applicable).
-        """
-        qualType = c_int()
-        chemname = create_string_buffer(self.EN_MAXID)
-        chemunits = create_string_buffer(self.EN_MAXID)
-        tracenode = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getqualinfo(self._ph, byref(qualType), byref(chemname),
-                                                    byref(chemunits), byref(tracenode))
-        else:
-            self.errcode = self._lib.ENgetqualinfo(byref(qualType), byref(chemname),
-                                                   byref(chemunits), byref(tracenode))
-
-        self.ENgeterror()
-        return [qualType.value, chemname.value.decode(), chemunits.value.decode(), tracenode.value]
-
-    def ENgetqualtype(self):
-        """ Retrieves the type of water quality analysis to be run.
-
-        ENgetqualtype()
-
-        Returns:
-        qualcode    type of analysis to run (see self.QualityType).
-        tracenode 	index of the node being traced (if applicable).
-        """
-        qualcode = c_int()
-        tracenode = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getqualtype(self._ph, byref(qualcode), byref(tracenode))
-        else:
-            self.errcode = self._lib.ENgetqualtype(byref(qualcode), byref(tracenode))
-
-        self.ENgeterror()
-        return [qualcode.value, tracenode.value]
-
-    def ENgetresultindex(self, objecttype, index):
-        """Retrieves the order in which a node or link appears in an output file.
-
-
-           ENgetresultindex(objecttype, index)
-
-        Parameters:
-        objecttype  a type of element (either EN_NODE or EN_LINK).
-        index       the element's current index (starting from 1).
-
-        Returns:
-        value the order in which the element's results were written to file.
-        """
-        value = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getresultindex(self._ph, objecttype, int(index), byref(value))
-        else:
-            self.errcode = self._lib.ENgetresultindex(objecttype, int(index), byref(value))
-
-        self.ENgeterror()
-        return value.value
-
-    def ENgetrule(self, index):
-        """ Retrieves summary information about a rule-based control.
-
-
-        ENgetrule(index):
-
-        Parameters:
-        index   	  the rule's index (starting from 1).
-
-        Returns:
-        nPremises     	 number of premises in the rule's IF section.
-        nThenActions    number of actions in the rule's THEN section.
-        nElseActions    number of actions in the rule's ELSE section.
-        priority        the rule's priority value.
-        """
-        nPremises = c_int()
-        nThenActions = c_int()
-        nElseActions = c_int()
-
-        if self._ph is not None:
-            priority = c_double()
-            self.errcode = self._lib.EN_getrule(self._ph, int(index), byref(nPremises),
-                                                byref(nThenActions),
-                                                byref(nElseActions), byref(priority))
-        else:
-            priority = c_float()
-            self.errcode = self._lib.ENgetrule(int(index), byref(nPremises),
-                                               byref(nThenActions),
-                                               byref(nElseActions), byref(priority))
-
-        self.ENgeterror()
-        return [nPremises.value, nThenActions.value, nElseActions.value, priority.value]
-
-    def ENgetruleID(self, index):
-        """ Gets the ID name of a rule-based control given its index.
-
-
-        ENgetruleID(index)
-
-        Parameters:
-        index   	  the rule's index (starting from 1).
-
-        Returns:
-        id  the rule's ID name.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___rules.html
-        """
-        nameID = create_string_buffer(self.EN_MAXID)
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getruleID(self._ph, int(index), byref(nameID))
-        else:
-            self.errcode = self._lib.ENgetruleID(int(index), byref(nameID))
-
-        self.ENgeterror()
-        return nameID.value.decode()
-
-    def ENgetstatistic(self, code):
-        """ Retrieves a particular simulation statistic.
-        EPANET 20100
-
-        ENgetstatistic(code)
-
-        Parameters:
-        code  	   the type of statistic to retrieve (see EN_AnalysisStatistic).
-
-        Returns:
-        value the value of the statistic.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___reporting.html
-        """
-        if self._ph is not None:
-            value = c_double()
-            self.errcode = self._lib.EN_getstatistic(self._ph, int(code), byref(value))
-        else:
-            value = c_float()
-            self.errcode = self._lib.ENgetstatistic(int(code), byref(value))
-
-        self.ENgeterror()
-        return value.value
-
-    def ENgetthenaction(self, ruleIndex, actionIndex):
-        """ Gets the properties of a THEN action in a rule-based control.
-
-
-        ENgetthenaction(ruleIndex, actionIndex)
-
-        Parameters:
-        ruleIndex   	the rule's index (starting from 1).
-        actionIndex   the index of the THEN action to retrieve (starting from 1).
-
-        Returns:
-        linkIndex   the index of the link in the action (starting from 1).
-        status      the status assigned to the link (see RULESTATUS).
-        setting     the value assigned to the link's setting.
-        """
-        linkIndex = c_int()
-        status = c_int()
-        if self._ph is not None:
-            setting = c_double()
-            self.errcode = self._lib.EN_getthenaction(self._ph, int(ruleIndex), int(actionIndex),
-                                                      byref(linkIndex),
-                                                      byref(status), byref(setting))
-        else:
-            setting = c_float()
-            self.errcode = self._lib.ENgetthenaction(int(ruleIndex), int(actionIndex),
-                                                     byref(linkIndex),
-                                                     byref(status), byref(setting))
-
-        self.ENgeterror()
-        return [linkIndex.value, status.value, setting.value]
-
-    def ENgettimeparam(self, paramcode):
-        """ Retrieves the value of a time parameter.
-
-        ENgettimeparam(paramcode)
-
-        Parameters:
-        paramcode    a time parameter code (see EN_TimeParameter).
-
-        Returns:
-        timevalue the current value of the time parameter (in seconds).
-        """
-        timevalue = c_long()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_gettimeparam(self._ph, c_int(paramcode), byref(timevalue))
-        else:
-            self.errcode = self._lib.ENgettimeparam(c_int(paramcode), byref(timevalue))
-
-        self.ENgeterror()
-        return timevalue.value
-
-    def ENgettitle(self):
-        """ Retrieves the title lines of the project.
-
-
-        ENgettitle()
-
-        Returns:
-        line1 first title line
-        line2 second title line
-        line3 third title line
-        """
-        line1 = create_string_buffer(80)
-        line2 = create_string_buffer(80)
-        line3 = create_string_buffer(80)
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_gettitle(self._ph, byref(line1), byref(line2),
-                                                 byref(line3))
-        else:
-            self.errcode = self._lib.ENgettitle(byref(line1), byref(line2),
-                                                byref(line3))
-
-        self.ENgeterror()
-        return [line1.value.decode(), line2.value.decode(), line3.value.decode()]
-
-    def ENgetversion(self):
-        """ Retrieves the toolkit API version number.
-
-        ENgetversion()
-
-        Returns:
-        LibEPANET the version of the OWA-EPANET toolkit.
-        """
-        LibEPANET = c_int()
-        self.errcode = self._lib.EN_getversion(byref(LibEPANET))
-        self.ENgeterror()
-        return LibEPANET.value
-
-    def ENgetvertex(self, index, vertex):
-        """ Retrieves the coordinate's of a vertex point assigned to a link.
-
-
-        ENgetvertex(index, vertex)
-
-        Parameters:
-        index      a link's index (starting from 1).
-        vertex     a vertex point index (starting from 1).
-
-        Returns:
-        x  the vertex's X-coordinate value.
-        y  the vertex's Y-coordinate value.
-        """
-        x = c_double()  # need double for EN_ or EN functions.
-        y = c_double()
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getvertex(self._ph, int(index), vertex, byref(x), byref(y))
-        else:
-            self.errcode = self._lib.ENgetvertex(int(index), vertex, byref(x), byref(y))
-
-        self.ENgeterror()
-        return [x.value, y.value]
-
-    def ENgetvertexcount(self, index):
-        """ Retrieves the number of internal vertex points assigned to a link.
-
-        ENgetvertexcount(index)
-
-        Parameters:
-        index      a link's index (starting from 1).
-
-        Returns:
-        count  the number of vertex points that describe the link's shape.
-        """
-        count = c_int()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_getvertexcount(self._ph, int(index), byref(count))
-        else:
-            self.errcode = self._lib.ENgetvertexcount(int(index), byref(count))
-
-        self.ENgeterror()
-        return count.value
-
-    def ENinit(self, unitsType, headLossType):
-        """ Initializes an EPANET project.
-
-
-        ENinit(unitsType, headLossType)
-
-        Parameters:
-        unitsType    the choice of flow units (see EN_FlowUnits).
-        headLossType the choice of head loss formula (see EN_HeadLossType).
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_init(self._ph, "", "", unitsType, headLossType)
-        else:
-            self.errcode = self._lib.ENinit("", "", unitsType, headLossType)
-
-        self.ENgeterror()
-
-    def ENinitH(self, flag):
-        """ Initializes a network prior to running a hydraulic analysis.
-
-        ENinitH(flag)
-
-        Parameters:
-        flag    	a 2-digit initialization flag (see EN_InitHydOption).
-
-        See also  ENinitH, ENrunH, ENnextH, ENreport, ENsavehydfile
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___hydraulics.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_initH(self._ph, flag)
-        else:
-            self.errcode = self._lib.ENinitH(flag)
-
-        self.ENgeterror()
-        return
-
-    def ENinitQ(self, saveflag):
-        """ Initializes a network prior to running a water quality analysis.
-
-        ENinitQ(saveflag)
-
-        Parameters:
-        saveflag  set to EN_SAVE (1) if results are to be saved to the project's
-                  binary output file, or to EN_NOSAVE (0) if not.
-
-        See also  ENinitQ, ENrunQ, ENnextQ
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___quality.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_initQ(self._ph, saveflag)
-        else:
-            self.errcode = self._lib.ENinitQ(saveflag)
-
-        self.ENgeterror()
-        return
-
-    def ENnextH(self):
-        """ Determines the length of time until the next hydraulic event occurs in an extended period simulation.
-
-        ENnextH()
-
-        Returns:
-        tstep the time (in seconds) until the next hydraulic event or 0 if at the end of the full simulation duration.
-
-        See also  ENrunH
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___hydraulics.html
-        """
-        tstep = c_long()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_nextH(self._ph, byref(tstep))
-        else:
-            self.errcode = self._lib.ENnextH(byref(tstep))
-
-        self.ENgeterror()
-        return tstep.value
-
-    def ENnextQ(self):
-        """ Advances a water quality simulation over the time until the next hydraulic event.
-
-        ENnextQ()
-
-        Returns:
-        tstep time (in seconds) until the next hydraulic event or 0 if at the end of the full simulation duration.
-
-        See also  ENstepQ, ENrunQ
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___quality.html
-        """
-        tstep = c_long()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_nextQ(self._ph, byref(tstep))
-        else:
-            self.errcode = self._lib.ENnextQ(byref(tstep))
-
-        self.ENgeterror()
-        return tstep.value
-
-    def ENopen(self, inpname=None, repname=None, binname=None):
-        """ Opens an EPANET input file & reads in network data.
-
-        ENopen(inpname, repname, binname)
-
-        Parameters:
-        inpname the name of an existing EPANET-formatted input file.
-        repname the name of a report file to be created (or "" if not needed).
-        binname the name of a binary output file to be created (or "" if not needed).
-
-        See also ENclose
-        """
-        if inpname is None:
-            inpname = self.inpfile
-        if repname is None:
-            repname = self.rptfile
-            if repname is None:
-                repname = inpname[0:-4] + '.txt'
-        if binname is None:
-            binname = self.binfile
-            if binname is None:
-                binname = repname[0:-4] + '.bin'
-
-        self.inpfile = bytes(inpname, 'utf-8')
-        self.rptfile = bytes(repname, 'utf-8')
-        self.binfile = bytes(binname, 'utf-8')
-
-        if self._ph is not None:
-            self._lib.EN_createproject(byref(self._ph))
-            self.errcode = self._lib.EN_open(self._ph, self.inpfile, self.rptfile, self.binfile)
-        else:
-            self.errcode = self._lib.ENopen(self.inpfile, self.rptfile, self.binfile)
-
-        self.ENgeterror()
-        return
-
-    def ENopenH(self):
-        """ Opens a project's hydraulic solver.
-
-        ENopenH()
-
-        See also  ENinitH, ENrunH, ENnextH, ENcloseH
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___hydraulics.html"""
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_openH(self._ph)
-        else:
-            self.errcode = self._lib.ENopenH()
-
-        self.ENgeterror()
-        return
-
-    def ENopenQ(self):
-        """ Opens a project's water quality solver.
-
-        ENopenQ()
-
-        See also  ENopenQ, ENinitQ, ENrunQ, ENnextQ,
-        ENstepQ, ENcloseQ
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___quality.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_openQ(self._ph)
-        else:
-            self.errcode = self._lib.ENopenQ()
-
-        self.ENgeterror()
-        return
-
-    def ENreport(self):
-        """ Writes simulation results in a tabular format to a project's report file.
-
-        ENreport()
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___reporting.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_report(self._ph)
-        else:
-            self.errcode = self._lib.ENreport()
-
-        self.ENgeterror()
-
-    def ENresetreport(self):
-        """ Resets a project's report options to their default values.
-
-        ENresetreport()
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___reporting.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_resetreport(self._ph)
-        else:
-            self.errcode = self._lib.ENresetreport()
-
-        self.ENgeterror()
-
-    def ENrunH(self):
-        """ Computes a hydraulic solution for the current point in time.
-
-        ENrunH()
-
-        Returns:
-        t  the current simulation time in seconds.
-
-        See also  ENinitH, ENrunH, ENnextH, ENcloseH
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___hydraulics.html
-        """
-        t = c_long()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_runH(self._ph, byref(t))
-        else:
-            self.errcode = self._lib.ENrunH(byref(t))
-
-        self.ENgeterror()
-        return t.value
-
-    def ENrunQ(self):
-        """ Makes hydraulic and water quality results at the start of the current
-        time period available to a project's water quality solver.
-
-        ENrunQ()
-
-        Returns:
-        t  current simulation time in seconds.
-        See also  ENopenQ, ENinitQ, ENrunQ, ENnextQ, ENstepQ
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___quality.html
-        """
-        t = c_long()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_runQ(self._ph, byref(t))
-        else:
-            self.errcode = self._lib.ENrunQ(byref(t))
-
-        self.ENgeterror()
-        return t.value
-
-    def ENsaveH(self):
-        """ Transfers a project's hydraulics results from its temporary hydraulics file to its binary output file,
-        where results are only reported at uniform reporting intervals.
-
-        ENsaveH()
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_saveH(self._ph)
-        else:
-            self.errcode = self._lib.ENsaveH()
-
-        self.ENgeterror()
-        return
-
-    def ENsavehydfile(self, fname):
-        """ Saves a project's temporary hydraulics file to disk.
-
-        ENsaveHydfile(fname)
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_savehydfile(self._ph, fname.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENsavehydfile(fname.encode("utf-8"))
-
-        self.ENgeterror()
-
-    def ENsaveinpfile(self, inpname):
-        """ Saves a project's data to an EPANET-formatted text file.
-
-        ENsaveinpfile(inpname)
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_saveinpfile(self._ph, inpname.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENsaveinpfile(inpname.encode("utf-8"))
-
-        self.ENgeterror()
-        return
-
-    def ENsetbasedemand(self, index, demandIdx, value):
-        """ Sets the base demand for one of a node's demand categories.
-
-
-        ENsetbasedemand(index, demandIdx, value)
-
-        Parameters:
-        index    	  a node's index (starting from 1).
-        demandIdx     the index of a demand category for the node (starting from 1).
-        value    	  the new base demand for the category.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setbasedemand(self._ph, int(index), demandIdx, c_double(value))
-        else:
-            self.errcode = self._lib.ENsetbasedemand(int(index), demandIdx, c_float(value))
-
-        self.ENgeterror()
-
-    def ENsetcomment(self, object_, index, comment):
-        """ Sets a comment to a specific index
-
-
-        ENsetcomment(object, index, comment)
-
-        Parameters:
-        object_     a type of object (either EN_NODE, EN_LINK, EN_TIMEPAT or EN_CURVE)
-                   e.g, obj.ToolkitConstants.EN_NODE
-        index      objects index (starting from 1).
-        comment    comment to be added.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setcomment(self._ph, object_, index, comment.encode('utf-8'))
-        else:
-            self.errcode = self._lib.ENsetcomment(object_, index, comment.encode('utf-8'))
-
-        self.ENgeterror()
-
-    def ENsetcontrol(self, cindex, ctype, lindex, setting, nindex, level):
-        """ Sets the properties of an existing simple control.
-
-        ENsetcontrol(cindex, ctype, lindex, setting, nindex, level)
-
-        Parameters:
-        cindex  the control's index (starting from 1).
-        ctype   the type of control (see ControlTypes).
-        lindex  the index of the link being controlled.
-        setting the control setting applied to the link.
-        nindex  the index of the node used to trigger the control (0 for EN_TIMER and EN_TIMEOFDAY controls).
-        level   the action level (tank level, junction pressure, or time in seconds) that triggers the control.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setcontrol(self._ph, int(cindex), ctype, lindex, c_double(setting),
-                                                   nindex, c_double(level))
-        else:
-            self.errcode = self._lib.ENsetcontrol(int(cindex), ctype, lindex, c_float(setting),
-                                                  nindex, c_float(level))
-
-        self.ENgeterror()
-
-    def ENsetcoord(self, index, x, y):
-        """ Sets the (x,y) coordinates of a node.
-
-
-        ENsetcoord(index, x, y)
-
-        Parameters:
-        index      a node's index.
-        x          the node's X-coordinate value.
-        y          the node's Y-coordinate value.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setcoord(self._ph, int(index), c_double(x), c_double(y))
-        else:
-            self.errcode = self._lib.ENsetcoord(int(index), c_double(x), c_double(y))
-
-        self.ENgeterror()
-
-    def ENsetcurve(self, index, x, y, nfactors):
-        """ Assigns a set of data points to a curve.
-
-
-        ENsetcurve(index, x, y, nfactors)
-
-        Parameters:
-        index         a curve's index (starting from 1).
-        x        	  an array of new x-values for the curve.
-        y        	  an array of new y-values for the curve.
-        nfactors      the new number of data points for the curve.
-
-        See also ENsetcurvevalue
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___curves.html
-        """
-        if nfactors == 1:
-
-            if self._ph is not None:
-                self.errcode = self._lib.EN_setcurve(self._ph, int(index), (c_double * 1)(x),
-                                                     (c_double * 1)(y), nfactors)
-            else:
-                self.errcode = self._lib.ENsetcurve(int(index), (c_float * 1)(x),
-                                                    (c_float * 1)(y), nfactors)
-
-
-        else:
-
-            if self._ph is not None:
-                self.errcode = self._lib.EN_setcurve(self._ph, int(index), (c_double * nfactors)(*x),
-                                                     (c_double * nfactors)(*y), nfactors)
-            else:
-                self.errcode = self._lib.ENsetcurve(int(index), (c_float * nfactors)(*x),
-                                                    (c_float * nfactors)(*y), nfactors)
-
-        self.ENgeterror()
-
-    def ENsetcurveid(self, index, Id):
-        """ Changes the ID name of a data curve given its index.
-
-
-        ENsetcurveid(index, Id)
-
-        Parameters:
-        index       a curve's index (starting from 1).
-        Id        	an array of new x-values for the curve.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___curves.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setcurveid(self._ph, int(index), Id.encode('utf-8'))
-        else:
-            self.errcode = self._lib.ENsetcurveid(int(index), Id.encode('utf-8'))
-
-        self.ENgeterror()
-
-    def ENsetcurvevalue(self, index, pnt, x, y):
-        """ Sets the value of a single data point for a curve.
-
-
-        ENsetcurvevalue(index, pnt, x, y)
-
-        Parameters:
-        index         a curve's index (starting from 1).
-        pnt        	  the index of a point on the curve (starting from 1).
-        x        	  the point's new x-value.
-        y        	  the point's new y-value.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setcurvevalue(self._ph, int(index), pnt,
-                                                      c_double(x), c_double(y))
-        else:
-            self.errcode = self._lib.ENsetcurvevalue(int(index), pnt,
-                                                     c_float(x), c_float(y))
-
-        self.ENgeterror()
-
-    def ENsetdemandmodel(self, Type, pmin, preq, pexp):
-        """ Sets the Type of demand model to use and its parameters.
-
-
-        ENsetdemandmodel(index, demandIdx, value)
-
-        Parameters:
-        Type         Type of demand model (see DEMANDMODEL).
-        pmin         Pressure below which there is no demand.
-        preq    	 Pressure required to deliver full demand.
-        pexp    	 Pressure exponent in demand function.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___demands.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setdemandmodel(self._ph, Type, c_double(pmin),
-                                                       c_double(preq), c_double(pexp))
-        else:
-            self.errcode = self._lib.ENsetdemandmodel(Type, c_float(pmin),
-                                                      c_float(preq), c_float(pexp))
-
-        self.ENgeterror()
-
-    def ENsetdemandname(self, node_index, demand_index, demand_name):
-        """ Assigns a name to a node's demand category.
-
-
-        ENsetdemandname(node_index, demand_index, demand_name)
-        Parameters:
-        node_index     a node's index (starting from 1).
-        demand_index   the index of one of the node's demand categories (starting from 1).
-        demand_name    the new name assigned to the category.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___demands.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setdemandname(self._ph, int(node_index), int(demand_index),
-                                                      demand_name.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENsetdemandname(int(node_index), int(demand_index),
-                                                     demand_name.encode("utf-8"))
-
-        self.ENgeterror()
-        return
-
-    def ENsetdemandpattern(self, index, demandIdx, patInd):
-        """ Sets the index of a time pattern used for one of a node's demand categories.
-
-        ENsetdemandpattern(index, demandIdx, patInd)
-
-        Parameters:
-        index         a node's index (starting from 1).
-        demandIdx     the index of one of the node's demand categories (starting from 1).
-        patInd        the index of the time pattern assigned to the category.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___demands.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setdemandpattern(self._ph, int(index), int(demandIdx), int(patInd))
-        else:
-            self.errcode = self._lib.ENsetdemandpattern(int(index), int(demandIdx), int(patInd))
-
-    def ENsetelseaction(self, ruleIndex, actionIndex, linkIndex, status, setting):
-        """ Sets the properties of an ELSE action in a rule-based control.
-
-
-        ENsetelseaction(ruleIndex, actionIndex, linkIndex, status, setting)
-
-        Parameters:
-        ruleIndex     the rule's index (starting from 1).
-        actionIndex   the index of the ELSE action being modified (starting from 1).
-        linkIndex     the index of the link in the action (starting from 1).
-        status        the new status assigned to the link (see RULESTATUS).
-        setting       the new value assigned to the link's setting.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setelseaction(self._ph, int(ruleIndex), int(actionIndex), int(linkIndex),
-                                                      status,
-                                                      c_double(setting))
-        else:
-            self.errcode = self._lib.ENsetelseaction(int(ruleIndex), int(actionIndex), int(linkIndex),
-                                                     status,
-                                                     c_float(setting))
-
-        self.ENgeterror()
-
-    def ENsetflowunits(self, code):
-        """ Sets a project's flow units.
-
-        ENsetflowunits(code)
-
-        Parameters:
-        code        a flow units code (see EN_FlowUnits)
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setflowunits(self._ph, code)
-        else:
-            self.errcode = self._lib.ENsetflowunits(code)
-
-        self.ENgeterror()
-
-    def ENsetheadcurveindex(self, pumpindex, curveindex):
-        """ Assigns a curve to a pump's head curve.
-
-        ENsetheadcurveindex(pumpindex, curveindex)
-
-        Parameters:
-        pumpindex     the index of a pump link (starting from 1).
-        curveindex    the index of a curve to be assigned as the pump's head curve.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setheadcurveindex(self._ph, int(pumpindex), int(curveindex))
-        else:
-            self.errcode = self._lib.ENsetheadcurveindex(int(pumpindex), int(curveindex))
-
-        self.ENgeterror()
-
-    def ENsetjuncdata(self, index, elev, dmnd, dmndpat):
-        """ Sets a group of properties for a junction node.
-
-
-        ENsetjuncdata(index, elev, dmnd, dmndpat)
-
-        Parameters:
-        index      a junction node's index (starting from 1).
-        elev       the value of the junction's elevation.
-        dmnd       the value of the junction's primary base demand.
-        dmndpat    the ID name of the demand's time pattern ("" for no pattern).
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___nodes.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setjuncdata(self._ph, int(index), c_double(elev), c_double(dmnd),
-                                                    dmndpat.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENsetjuncdata(int(index), c_float(elev), c_float(dmnd),
-                                                   dmndpat.encode("utf-8"))
-
-        self.ENgeterror()
-
-    def ENsetlinkid(self, index, newid):
-        """ Changes the ID name of a link.
-
-
-        ENsetlinkid(index, newid)
-
-        Parameters:
-        index         a link's index (starting from 1).
-        newid         the new ID name for the link.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___links.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setlinkid(self._ph, int(index), newid.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENsetlinkid(int(index), newid.encode("utf-8"))
-
-        self.ENgeterror()
-
-    def ENsetlinknodes(self, index, startnode, endnode):
-        """ Sets the indexes of a link's start- and end-nodes.
-
-
-        ENsetlinknodes(index, startnode, endnode)
-
-        Parameters:
-        index         a link's index (starting from 1).
-        startnode     The index of the link's start node (starting from 1).
-        endnode       The index of the link's end node (starting from 1).
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setlinknodes(self._ph, int(index), startnode, endnode)
-        else:
-            self.errcode = self._lib.ENsetlinknodes(int(index), startnode, endnode)
-
-        self.ENgeterror()
-
-    def ENsetlinktype(self, indexLink, paramcode, actionCode):
-        """ Changes a link's type.
-
-
-        ENsetlinktype(id, paramcode, actionCode)
-
-        Parameters:
-        indexLink     a link's index (starting from 1).
-        paramcode     the new type to change the link to (see self.LinkType).
-        actionCode    the action taken if any controls contain the link.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___links.html
-        """
-        indexLink = c_int(indexLink)
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setlinktype(self._ph, byref(indexLink), paramcode, actionCode)
-        else:
-            self.errcode = self._lib.ENsetlinktype(byref(indexLink), paramcode, actionCode)
-
-        self.ENgeterror()
-        return indexLink.value
-
-    def ENsetlinkvalue(self, index, paramcode, value):
-        """ Sets a property value for a link.
-
-        ENsetlinkvalue(index, paramcode, value)
-
-        Parameters:
-        index         a link's index.
-        paramcode     the property to set (see EN_LinkProperty).
-        value         the new value for the property.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___links.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setlinkvalue(self._ph, c_int(index), c_int(paramcode),
-                                                     c_double(value))
-        else:
-            self.errcode = self._lib.ENsetlinkvalue(c_int(index), c_int(paramcode),
-                                                    c_float(value))
-
-        self.ENgeterror()
-        return
-
-    def ENsetnodeid(self, index, newid):
-        """ Changes the ID name of a node.
-
-
-        ENsetnodeid(index, newid)
-
-        Parameters:
-        index      a node's index (starting from 1).
-        newid      the new ID name for the node.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___nodes.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setnodeid(self._ph, int(index), newid.encode('utf-8'))
-        else:
-            self.errcode = self._lib.ENsetnodeid(int(index), newid.encode('utf-8'))
-        self.ENgeterror()
-
-    def ENsetnodevalue(self, index, paramcode, value):
-        """ Sets a property value for a node.
-
-
-        ENsetnodevalue(index, paramcode, value)
-
-        Parameters:
-        index      a node's index (starting from 1).
-        paramcode  the property to set (see EN_NodeProperty, self.getToolkitConstants).
-        value      the new value for the property.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___nodes.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setnodevalue(self._ph, c_int(index), c_int(paramcode),
-                                                     c_double(value))
-        else:
-            self.errcode = self._lib.ENsetnodevalue(c_int(index), c_int(paramcode),
-                                                    c_float(value))
-        self.ENgeterror()
-        return
-
-    def ENsetoption(self, optioncode, value):
-        """ Sets the value for an anlysis option.
-
-        ENsetoption(optioncode, value)
-
-        Parameters:
-        optioncode   a type of analysis option (see EN_Option).
-        value        the new value assigned to the option.
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setoption(self._ph, optioncode, c_double(value))
-        else:
-            self.errcode = self._lib.ENsetoption(optioncode, c_float(value))
-        self.ENgeterror()
-
-    def ENsetpattern(self, index, factors, nfactors):
-        """ Sets the pattern factors for a given time pattern.
-
-        ENsetpattern(index, factors, nfactors)
-
-        Parameters:
-        index      a time pattern index (starting from 1).
-        factors    an array of new pattern factor values.
-        nfactors   the number of factor values supplied.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___patterns.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setpattern(self._ph, int(index), (c_double * nfactors)(*factors), nfactors)
-        else:
-            self.errcode = self._lib.ENsetpattern(int(index), (c_float * nfactors)(*factors),
-                                                  nfactors)
-        self.ENgeterror()
-
-    def ENsetpatternid(self, index, Id):
-        """ Changes the ID name of a time pattern given its index.
-
-
-        ENsetpatternid(index, id)
-
-        Parameters:
-        index      a time pattern index (starting from 1).
-        id         the time pattern's new ID name.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___patterns.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setpatternid(self._ph, int(index), Id.encode('utf-8'))
-        else:
-            self.errcode = self._lib.ENsetpatternid(int(index), Id.encode('utf-8'))
-        self.ENgeterror()
-
-    def ENsetpatternvalue(self, index, period, value):
-        """ Sets a time pattern's factor for a given time period.
-
-        ENsetpatternvalue(index, period, value)
-
-        Parameters:
-        index      a time pattern index (starting from 1).
-        period     a time period in the pattern (starting from 1).
-        value      the new value of the pattern factor for the given time period.
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setpatternvalue(self._ph, int(index), period, c_double(value))
-        else:
-            self.errcode = self._lib.ENsetpatternvalue(int(index), period, c_float(value))
-        self.ENgeterror()
-
-    def ENsetpipedata(self, index, length, diam, rough, mloss):
-        """ Sets a group of properties for a pipe link.
-
-
-        ENsetpipedata(index, length, diam, rough, mloss)
-
-        Parameters:
-        index         the index of a pipe link (starting from 1).
-        length        the pipe's length.
-        diam          the pipe's diameter.
-        rough         the pipe's roughness coefficient.
-        mloss         the pipe's minor loss coefficient.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___links.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setpipedata(self._ph, int(index), c_double(length),
-                                                    c_double(diam), c_double(rough),
-                                                    c_double(mloss))
-        else:
-            self.errcode = self._lib.ENsetpipedata(int(index), c_float(length),
-                                                   c_float(diam), c_float(rough),
-                                                   c_float(mloss))
-
-        self.ENgeterror()
-
-    def ENsetpremise(self, ruleIndex, premiseIndex, logop, object_, objIndex, variable, relop, status, value):
-        """ Sets the properties of a premise in a rule-based control.
-
-
-        ENsetpremise(ruleIndex, premiseIndex, logop, object, objIndex, variable, relop, status, value)
-
-        Parameters:
-        ruleIndex     the rule's index (starting from 1).
-        premiseIndex  the position of the premise in the rule's list of premises.
-        logop         the premise's logical operator ( IF = 1, AND = 2, OR = 3 ).
-        object_       the type of object the premise refers to (see RULEOBJECT).
-        objIndex      the index of the object (e.g. the index of a tank).
-        variable      the object's variable being compared (see RULEVARIABLE).
-        relop         the premise's comparison operator (see RULEOPERATOR).
-        status        the status that the object's status is compared to (see RULESTATUS).
-        value         the value that the object's variable is compared to.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___rules.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setpremise(self._ph, int(ruleIndex), int(premiseIndex), logop, object_,
-                                                   objIndex, variable, relop, status, c_double(value))
-        else:
-            self.errcode = self._lib.ENsetpremise(int(ruleIndex), int(premiseIndex), logop, object_,
-                                                  objIndex, variable, relop, status, c_float(value))
-
-        self.ENgeterror()
-
-    def ENsetpremiseindex(self, ruleIndex, premiseIndex, objIndex):
-        """ Sets the index of an object in a premise of a rule-based control.
-
-
-        ENsetpremiseindex(ruleIndex, premiseIndex, objIndex)
-
-        Parameters:
-        ruleIndex     the rule's index (starting from 1).
-        premiseIndex  the premise's index (starting from 1).
-        objIndex      the index of the object (e.g. the index of a tank).
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setpremiseindex(self._ph, int(ruleIndex), int(premiseIndex), objIndex)
-        else:
-            self.errcode = self._lib.ENsetpremiseindex(int(ruleIndex), int(premiseIndex), objIndex)
-
-        self.ENgeterror()
-
-    def ENsetpremisestatus(self, ruleIndex, premiseIndex, status):
-        """ Sets the status being compared to in a premise of a rule-based control.
-
-
-        ENsetpremisestatus(ruleIndex, premiseIndex, status)
-
-        Parameters:
-        ruleIndex     the rule's index (starting from 1).
-        premiseIndex  the premise's index (starting from 1).
-        status        the status that the premise's object status is compared to (see RULESTATUS).
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setpremisestatus(self._ph, int(ruleIndex), int(premiseIndex), status)
-        else:
-            self.errcode = self._lib.ENsetpremisestatus(int(ruleIndex), int(premiseIndex), status)
-
-        self.ENgeterror()
-
-    def ENsetpremisevalue(self, ruleIndex, premiseIndex, value):
-        """ Sets the value in a premise of a rule-based control.
-
-
-        ENsetpremisevalue(ruleIndex, premiseIndex, value)
-
-        Parameters:
-        ruleIndex     the rule's index (starting from 1).
-        premiseIndex  the premise's index (starting from 1).
-        value         The value that the premise's variable is compared to.
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setpremisevalue(self._ph, int(ruleIndex), premiseIndex, c_double(value))
-        else:
-            self.errcode = self._lib.ENsetpremisevalue(int(ruleIndex), premiseIndex, c_float(value))
-
-        self.ENgeterror()
-
-    def ENsetqualtype(self, qualcode, chemname, chemunits, tracenode):
-        """ Sets the type of water quality analysis to run.
-
-        ENsetqualtype(qualcode, chemname, chemunits, tracenode)
-
-        Parameters:
-        qualcode    the type of analysis to run (see EN_QualityType, self.QualityType).
-        chemname    the name of the quality constituent.
-        chemunits   the concentration units of the constituent.
-        tracenode   a type of analysis option (see ENOption).
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___options.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setqualtype(self._ph, qualcode, chemname.encode("utf-8"),
-                                                    chemunits.encode("utf-8"), tracenode.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENsetqualtype(qualcode, chemname.encode("utf-8"),
-                                                   chemunits.encode("utf-8"), tracenode.encode("utf-8"))
-
-        self.ENgeterror()
-        return
-
-    def ENsetreport(self, command):
-        """ Processes a reporting format command.
-
-        ENsetreport(command)
-
-        Parameters:
-        command    a report formatting command.
-
-        See also ENreport
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setreport(self._ph, command.encode("utf-8"))
-        else:
-            self.errcode = self._lib.ENsetreport(command.encode("utf-8"))
-
-        self.ENgeterror()
-
-    def ENsetrulepriority(self, ruleIndex, priority):
-        """ Sets the priority of a rule-based control.
-
-
-        ENsetrulepriority(ruleIndex, priority)
-
-        Parameters:
-        ruleIndex     the rule's index (starting from 1).
-        priority      the priority value assigned to the rule.
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setrulepriority(self._ph, int(ruleIndex), c_double(priority))
-        else:
-            self.errcode = self._lib.ENsetrulepriority(int(ruleIndex), c_float(priority))
-
-        self.ENgeterror()
-
-    def ENsetstatusreport(self, statuslevel):
-        """ Sets the level of hydraulic status reporting.
-
-        ENsetstatusreport(statuslevel)
-
-        Parameters:
-        statuslevel  a status reporting level code (see EN_StatusReport).
-
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___reporting.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setstatusreport(self._ph, statuslevel)
-        else:
-            self.errcode = self._lib.ENsetstatusreport(statuslevel)
-
-        self.ENgeterror()
-
-    def ENsettankdata(self, index, elev, initlvl, minlvl, maxlvl, diam, minvol, volcurve):
-        """ Sets a group of properties for a tank node.
-
-
-        ENsettankdata(index, elev, initlvl, minlvl, maxlvl, diam, minvol, volcurve)
-
-        Parameters:
-        index       a tank node's index (starting from 1).
-        elev      	the tank's bottom elevation.
-        initlvl     the initial water level in the tank.
-        minlvl      the minimum water level for the tank.
-        maxlvl      the maximum water level for the tank.
-        diam        the tank's diameter (0 if a volume curve is supplied).
-        minvol      the new value for the property.
-        volcurve    the volume of the tank at its minimum water level.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___nodes.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_settankdata(
-                self._ph, index, c_double(elev), c_double(initlvl), c_double(minlvl),
-                c_double(maxlvl), c_double(diam), c_double(minvol), volcurve.encode('utf-8'))
-        else:
-            self.errcode = self._lib.ENsettankdata(index, c_float(elev), c_float(initlvl), c_float(minlvl),
-                                                   c_float(maxlvl), c_float(diam), c_float(minvol),
-                                                   volcurve.encode('utf-8'))
-
-        self.ENgeterror()
-
-    def ENsetthenaction(self, ruleIndex, actionIndex, linkIndex, status, setting):
-        """ Sets the properties of a THEN action in a rule-based control.
-
-
-        ENsetthenaction(ruleIndex, actionIndex, linkIndex, status, setting)
-
-        Parameters:
-        ruleIndex     the rule's index (starting from 1).
-        actionIndex   the index of the THEN action to retrieve (starting from 1).
-        linkIndex     the index of the link in the action.
-        status        the new status assigned to the link (see EN_RuleStatus)..
-        setting       the new value assigned to the link's setting.
-
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setthenaction(self._ph, int(ruleIndex), int(actionIndex), int(linkIndex),
-                                                      status,
-                                                      c_double(setting))
-        else:
-            self.errcode = self._lib.ENsetthenaction(int(ruleIndex), int(actionIndex), int(linkIndex),
-                                                     status,
-                                                     c_float(setting))
-
-        self.ENgeterror()
-
-    def ENsettimeparam(self, paramcode, timevalue):
-        """ Sets the value of a time parameter.
-
-        ENsettimeparam(paramcode, timevalue)
-
-        Parameters:
-        paramcode    a time parameter code (see EN_TimeParameter).
-        timevalue    the new value of the time parameter (in seconds).
-        """
-        self.solve = 0
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_settimeparam(self._ph, c_int(paramcode), c_long(int(timevalue)))
-        else:
-            self.errcode = self._lib.ENsettimeparam(c_int(paramcode), c_long(int(timevalue)))
-
-        self.ENgeterror()
-
-    def ENsettitle(self, line1, line2, line3):
-        """ Sets the title lines of the project.
-
-
-        ENsettitle(line1, line2, line3)
-
-        Parameters:
-        line1   first title line
-        line2   second title line
-        line3   third title line
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_settitle(self._ph, line1.encode("utf-8"), line2.encode("utf-8"),
-                                                 line3.encode("utf-8"))
-
-        else:
-            self.errcode = self._lib.ENsettitle(line1.encode("utf-8"), line2.encode("utf-8"),
-                                                line3.encode("utf-8"))
-
-        self.ENgeterror()
-
-    def ENsetvertices(self, index, x, y, vertex):
-        """ Assigns a set of internal vertex points to a link.
-
-
-        ENsetvertices(index, x, y, vertex)
-
-        Parameters:
-        index      a link's index (starting from 1).
-        x          an array of X-coordinates for the vertex points.
-        y          an array of Y-coordinates for the vertex points.
-        vertex     the number of vertex points being assigned.
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_setvertices(self._ph, int(index), (c_double * vertex)(*x),
-                                                    (c_double * vertex)(*y), vertex)
-
-        else:
-            self.errcode = self._lib.ENsetvertices(int(index), (c_double * vertex)(*x),
-                                                   (c_double * vertex)(*y), vertex)
-
-        self.ENgeterror()
-
-    def ENsolveH(self):
-        """ Runs a complete hydraulic simulation with results for all time periods
-        written to a temporary hydraulics file.
-
-        ENsolveH()
-
-        See also ENopenH, ENinitH, ENrunH, ENnextH, ENcloseH
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___hydraulics.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_solveH(self._ph)
-
-        else:
-            self.errcode = self._lib.ENsolveH()
-
-        self.ENgeterror()
-        return
-
-    def ENsolveQ(self):
-        """ Runs a complete water quality simulation with results at uniform reporting
-        intervals written to the project's binary output file.
-
-        ENsolveQ()
-
-        See also ENopenQ, ENinitQ, ENrunQ, ENnextQ, ENcloseQ
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___hydraulics.html"""
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_solveQ(self._ph)
-
-        else:
-            self.errcode = self._lib.ENsolveQ()
-
-        self.ENgeterror()
-        return
-
-    def ENstepQ(self):
-        """ Advances a water quality simulation by a single water quality time step.
-
-        ENstepQ()
-
-        Returns:
-        tleft  time left (in seconds) to the overall simulation duration.
-
-        See also ENrunQ, ENnextQ
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___hydraulics.html
-        """
-        tleft = c_long()
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_stepQ(self._ph, byref(tleft))
-
-        else:
-            self.errcode = self._lib.ENstepQ(byref(tleft))
-
-        self.ENgeterror()
-        return tleft.value
-
-    def ENusehydfile(self, hydfname):
-        """ Uses a previously saved binary hydraulics file to supply a project's hydraulics.
-
-        ENusehydfile(hydfname)
-
-        Parameters:
-        hydfname  the name of the binary file containing hydraulic results.
-
-        OWA-EPANET Toolkit: http://wateranalytics.org/EPANET/group___hydraulics.html
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_usehydfile(self._ph, hydfname.encode("utf-8"))
-
-        else:
-            self.errcode = self._lib.ENusehydfile(hydfname.encode("utf-8"))
-
-        self.ENgeterror()
-        return
-
-    def ENwriteline(self, line):
-        """ Writes a line of text to a project's report file.
-
-        ENwriteline(line)
-
-        Parameters:
-        line         a text string to write.
-        """
-
-        if self._ph is not None:
-            self.errcode = self._lib.EN_writeline(self._ph, line.encode("utf-8"))
-
-        else:
-            self.errcode = self._lib.ENwriteline(line.encode("utf-8"))
-
-        self.ENgeterror()
-
-
-class epanetmsxapi(error_handler):
-    """example msx = epanetmsxapi()"""
-
-    def __init__(self, msxfile='', loadlib=True, ignore_msxfile=False, customMSXlib=None, display_msg=True,
-                 msxrealfile=''):
-        self.display_msg = display_msg
-        self.customMSXlib = customMSXlib
-        if customMSXlib is not None:
-            self.MSXLibEPANET = customMSXlib
-            loadlib = False
-            self.msx_lib = cdll.LoadLibrary(self.MSXLibEPANET)
-            self.MSXLibEPANETPath = os.path.dirname(self.MSXLibEPANET)
-            self.msx_error = self.msx_lib.MSXgeterror
-            self.msx_error.argtypes = [c_int, c_char_p, c_int]
-        if loadlib:
-            ops = platform.system().lower()
-            if ops in ["windows"]:
-                self.MSXLibEPANET = os.path.join(epyt_root, os.path.join("libraries", "win", "epanetmsx.dll"))
-            elif ops in ["darwin"]:
-                self.MSXLibEPANET = os.path.join(epyt_root, os.path.join("libraries", "mac", "epanetmsx.dylib"))
-            else:
-                self.MSXLibEPANET = os.path.join(epyt_root, os.path.join("libraries", "glnx", "epanetmsx.so"))
-
-            self.msx_lib = cdll.LoadLibrary(self.MSXLibEPANET)
-            self.MSXLibEPANETPath = os.path.dirname(self.MSXLibEPANET)
-
-            self.msx_error = self.msx_lib.MSXgeterror
-            self.msx_error.argtypes = [c_int, c_char_p, c_int]
-
-        if not ignore_msxfile:
-            self.MSXopen(msxfile, msxrealfile)
-
-    def MSXopen(self, msxfile, msxrealfile):
-        """
-        Open MSX file
-        filename - Arsenite.msx or use full path
-
-        Example:
-            msx.MSXopen(filename)
-            msx.MSXopen(Arsenite.msx)
-        """
-        if not os.path.exists(msxfile):
-            raise FileNotFoundError(f"File not found: ")
-
-        if self.display_msg:
-            msxname = os.path.basename(msxrealfile)
-            if self.customMSXlib is None:
-                print(f"EPANET-MSX version {__msxversion__} loaded.")
-
-        self.errcode = self.msx_lib.MSXopen(c_char_p(msxfile.encode('utf-8')))
-        if self.errcode != 0:
-            self.MSXerror(self.errcode)
-            # if self.errcode == 520:
-            #     if self.display_msg:
-            #         print(f"MSX file {msxname}.msx loaded successfully.")
-            if self.errcode == 503:
-                if self.display_msg:
-                    print("Error 503 may indicate a problem with the MSX file or the MSX library.")
-        else:
-            if self.display_msg:
-                print(f"MSX file {msxname}.msx loaded successfully.")
-
-    def MSXclose(self):
-        """  Close .msx file
-            example : msx.MSXclose()"""
-        self.errcode = self.msx_lib.MSXclose()
-        if self.errcode != 0:
-            self.MSXerror(self.errcode)
-        return self.errcode
-
-    def MSXerror(self, err_code):
-        """ Function that every other function uses in case of an error """
-        errmsg = create_string_buffer(256)
-        self.msx_error(err_code, errmsg, 256)
-        print(errmsg.value.decode())
-
-    def MSXgetindex(self, obj_type, obj_id):
-        """ Retrieves the number of objects of a specific type
-          MSXgetcount(obj_type, obj_id)
-
-          Parameters:
-               obj_type: code type of object being sought and must be one of the following
-               pre-defined constants:
-               MSX_SPECIES (for a chemical species) the number 3
-               MSX_CONSTANT (for a reaction constant) the number 6
-               MSX_PARAMETER (for a reaction parameter) the number 5
-               MSX_PATTERN (for a time pattern) the number 7
-
-               obj_id: string containing the object's ID name
-          Returns:
-              The index number (starting from 1) of object of that type with that specific name."""
-        obj_type = c_int(obj_type)
-        # obj_id=c_char_p(obj_id)
-        index = c_int()
-        self.errcode = self.msx_lib.MSXgetindex(obj_type, obj_id.encode("utf-8"), byref(index))
-        if self.errcode != 0:
-            Warning(self.MSXerror(self.errcode))
-        return index.value
-
-    def MSXgetID(self, obj_type, index, id_len=80):
-        """ Retrieves the ID name of an object given its internal
-            index number
-            msx.MSXgetID(obj_type, index, id_len)
-            print(msx.MSXgetID(3,1,8))
-
-            Parameters:
-                obj_type: type of object being sought and must be on of the
-                following pre-defined constants:
-                MSX_SPECIES (for chemical species)
-                MSX_CONSTANT(for reaction constant)
-                MSX_PARAMETER(for a reaction parameter)
-                MSX_PATTERN (for a time pattern)
-
-                index: the sequence number of the object (starting from 1
-                as listed in the MSX input file)
-
-                id_len: the maximum number of characters that id can hold
+            int: An error code indicating success or failure of the operation.
+
+        Example Usage:
+            inp_filename = "Net1.inp"
+
+            d = epanet(inp_filename)
+            errcode = d.setCurveTypeGeneral(1)
+            curve_type = d.getCurveType(1)
+            """
+        errcode = self.api.ENsetcurvetype(index, self.ToolkitConstants.EN_GENERIC_CURVE)
+        return errcode
+
+    def setCurveTypeValveCurve(self, index):
+        """Purpose:
+                    Sets the type of a curve to Valve in the EPANET model.
+
+                Parameters:
+                    index (int): The index of the curve to modify.
 
                 Returns:
-                    id object's ID name"""
+                    int: An error code indicating success or failure of the operation.
 
-        obj_id = create_string_buffer(id_len + 1)
-        self.errcode = self.msx_lib.MSXgetID(obj_type, index, obj_id, id_len)
-        if self.errcode != 0:
-            Warning(self.MSXerror(self.errcode))
-        return obj_id.value.decode()
+                Example Usage:
+                    inp_filename = "Net1.inp"
 
-    def MSXgetIDlen(self, obj_type, index):
-        """Retrieves the number of characters in the ID name of an MSX
-           object given its internal index number
-           msx.MSXgetIDlen(obj_type, index)
-           print(msx.MSXgetIDlen(3,3))
-           Parameters:
-            obj_type: type of object being sought and must be on of the
-                  following pre-defined constants:
-                  MSX_SPECIES (for chemical species)
-                  MSX_CONSTANT(for reaction constant)
-                  MSX_PARAMETER(for a reaction parameter)
-                  MSX_PATTERN (for a time pattern)
+                    d = epanet(inp_filename)
+                    errcode = d.setCurveTypeValveCurve(1)
+                    curve_type = d.getCurveType(1)
+                    """
+        errcode = self.api.ENsetcurvetype(index, self.ToolkitConstants.EN_VALVE_CURVE)
+        return errcode
 
-            index: the sequence number of the object (starting from 1
-                   as listed in the MSX input file)
-
-            Returns : the number of characters in the ID name of MSX object
-
-            """
-        len = c_int()
-        self.errcode = self.msx_lib.MSXgetIDlen(obj_type, index, byref(len))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return len.value
-
-    def MSXgetspecies(self, index):
-        """ Retrieves the attributes of a chemical species given its
-            internal index number
-            msx.MSXgetspecies(index)
-            msx.MSXgetspecies(1)
-            Parameters:
-             index : integer -> sequence number of the species
-
-            Returns:
-                type : is returned with one of the following pre-defined constants:
-                       MSX_BULK (defined as 0) for a bulk water species , or
-                       MSX_WALL (defined as 1) for a pipe wall surface species
-                units: mass units that were defined for the species in question
-                atol : the absolute concentration tolerance defined for the species.
-                rtol : the relative concentration tolerance defined for the species.  """
-        type = c_int()
-        units = create_string_buffer(16)
-        atol = c_double()
-        rtol = c_double()
-
-        self.errcode = self.msx_lib.MSXgetspecies(
-            index, byref(type), units, byref(atol), byref(rtol))
-
-        if type.value == 0:
-            type = 'BULK'
-        elif type.value == 1:
-            type = 'WALL'
-
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return type, units.value.decode("utf-8"), atol.value, rtol.value
-
-    def MSXgetcount(self, code):
-        """ Retrieves the number of objects of a specific type
-            MSXgetcount(code)
-
-            Parameters:
-                 code type of object being sought and must be one of the following
-                 pre-defined constants:
-                 MSX_SPECIES (for a chemical species) the number 3
-                 MSX_CONSTANT (for a reaction constant) the number 6
-                 MSX_PARAMETER (for a reaction parameter) the number 5
-                 MSX_PATTERN (for a time pattern) the number 7
-            Returns:
-                The count number of object of that type.
-         """
-        count = c_int()
-        self.errcode = self.msx_lib.MSXgetcount(code, byref(count))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return count.value
-
-    def MSXgetconstant(self, index):
-        """ Retrieves the value of a particular rection constant  """
-        """msx.MSXgetconstant(index)
-        msx.MSXgetconstant(1)"""
-        """" Parameters:
-        index : integer is the sequence number of the reaction
-                constant ( starting from 1 ) as it 
-                appeared in the MSX input file
-
-        Returns: value -> the value assigned to the constant.    """
-        value = c_double()
-        self.errcode = self.msx_lib.MSXgetconstant(index, byref(value))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return value.value
-
-    def MSXgetparameter(self, obj_type, index, param):
-        """Retrieves the value of a particular reaction parameter for a given
-           pipe
-           msx.MSXgetparameter(obj_type, index, param)
-           msx.MSXgetparameter(1,1,1)
-           Parameters:
-               obj_type: is type of object being queried and must be either:
-                    MSX_NODE (defined as 0) for a node or
-                    MSX_LINK(defined as 1) for alink
-
-               index: is the internal sequence number (starting from 1)
-                      assigned to the node or link
-
-               param: the sequence number of the parameter (starting from 1
-                      as listed in the MSX input file)
-
-               Returns:
-                   value : the value assigned to the parameter for the node or link
-                           of interest.        """
-        value = c_double()
-        self.errcode = self.msx_lib.MSXgetparameter(obj_type, index, param, byref(value))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return value.value
-
-    def MSXgetpatternlen(self, pattern_index):
-        """Retrieves the number of time periods within a source time pattern
-
-         MSXgetpatternlen(pattern_index)
+    def setVertex(self, index, vertex, x, y):
+        """
+        Purpose:
+            Sets the coordinates of a vertex point in a link within the EPANET model.
 
         Parameters:
-             pattern_index:  the internal sequence number (starting from 1)
-                             of the pattern as it appears in the MSX input file.
+            index (int): The index of the link for which the vertex coordinates are to be set.
+            vertex (int): The index of the specific vertex point within the link.
+            x (float): The X-coordinate of the vertex point.
+            y (float): The Y-coordinate of the vertex point.
 
         Returns:
-             len:   the number of time periods (and therefore number of multipliers)
-                   that appear in the pattern."""
-        len = c_int()
-        self.errcode = self.msx_lib.MSXgetpatternlen(pattern_index, byref(len))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return len.value
+            int: An error code indicating success or failure of the operation.
 
-    def MSXgetpatternvalue(self, pattern_index, period):
-        """  Retrieves the multiplier at a specific time period for a
-             given source time pattern
-            msx.MSXgetpatternvalue(pattern_index, period)
-            msx.MSXgetpatternvalue(1,1)
-             Parameters:
-                 pattern_index: the internal sequence number(starting from 1)
-                 of the pattern as it appears in the MSX input file
+        Example Usage:
+            inpname = "Net1.inp"
 
-                 period: the index of the time period (starting from 1) whose
-                 multiplier is being sought """
-        value = c_double()
-        self.errcode = self.msx_lib.MSXgetpatternvalue(pattern_index, period, byref(value))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return value.value
+            # Initialize EPANET model with the input file
+            d = epanet(inpname)
 
-    def MSXgetinitqual(self, obj_type, index, species):
-        """  Retrieves the intial concetration of a particular chemical species
-             assigned to a specific node or link of the pipe network
-            msx.MSXgetinitqual(obj_type, index)
-            msx.MSXgetinitqual(1,1,1)
-             Parameters:
-
-                 type : type of object being queeried and must be either:
-                        MSX_NODE (defined as 0) for a node or ,
-                        MSX_LINK (defined as 1) for a link
-
-                 index : the internal sequence number (starting from 1) assigned
-                         to the node or link
-
-                 species: the sequence number of the species (starting from 1)
-
-                 Returns:
-                        value: the initial concetration of the species at the node or
-                               link of interest."""
-        value = c_double()
-        obj_type = c_int(obj_type)
-        species = c_int(species)
-        index = c_int(index)
-        self.errcode = self.msx_lib.MSXgetinitqual(obj_type, index, species, byref(value))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return value.value
-
-    def MSXgetsource(self, node_index, species_index):
-        """ Retrieves information on any external source of a particular
-            chemical species assigned to a specific node or link of the pipe
-            network.
-            msx.MSXgetsource(node_index, species_index)
-            msx.MSXgetsource(1,1)
-
-            Parameters:
-                node_index: the internal sequence number (starting from 1)
-                assigned to the node of interest.
-
-                species_index: the sequence number of the species of interest
-                (starting from 1 as listed in MSX input file)
-            Returns:
-
-                type: the type of external source to be utilized and will be one of
-                     the following predefined constants:
-                    MSX_NOSOURCE (defined as -1) for no source
-                    MSX_CONCEN (defined as 0) for a concetration sourc
-                    MSX_MASS (defined as 1) for a mass booster source
-                    MSX_SETPOINT (defined as 2) for a setpoint source
-                    MSX_FLOWPACE (defined as 3) for a flow paced source
-
-                level: the baseline concentration ( or mass flow rate) of the source)
-
-                pat : the index of the time pattern used to add variability to the
-                      the source's baseline level (and will be 0 if no pattern
-                      was defined for the source)
-              """
-        type = c_int()
-        level = c_double()
-        pattern = c_int()
-        node_index = c_int(node_index)
-        self.errcode = self.msx_lib.MSXgetsource(node_index, species_index,
-                                        byref(type), byref(level), byref(pattern))
-
-        if type.value == -1:
-            type = 'NOSOURCE'
-        elif type.value == 0:
-            type = 'CONCEN'
-        elif type.value == 1:
-            type = 'MASS'
-        elif type.value == 2:
-            type = 'SETPOINT'
-        elif type.value == 3:
-            type = 'FLOWPACED'
-
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-        return type, level.value, pattern.value
-
-    def MSXsaveoutfile(self, filename):
-        """ Saves water quality results computed for each node, link
-            and reporting time period to a named binary file.
-            msx.MSXsaveoutfile(filename)
-            msx.MSXsaveoufile(Arsenite.msx)
-
-            Parameters:
-                filename: name of the permanent output results file"""
-        self.errcode = self.msx_lib.MSXsaveoutfile(filename.encode())
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXsavemsxfile(self, filename):
-        """ Saves the data associated with the current MSX project into a new
-            MSX input file
-            msx.MSXsavemsxfile(filename)
-            msx.MSXsavemsxfile(Arsenite.msx)
-
-            Parameters:
-                filename: name of the file to which data are saved"""
-        self.errcode = self.msx_lib.MSXsavemsxfile(filename.encode())
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXsetconstant(self, index, value):
-        """ Assigns a new value to a specific reaction constant
-            msx.MSXsetconstant(index, value)
-            msx.MSXsetconstant(1,10)"""
-        """" Parameters
-             index : integer -> is the sequence number of the reaction
-             constant ( starting from 1 ) as it appeared in the MSX
-             input file
-
-             Value: float -> the new value to be assigned to the constant."""
-
-        value = c_double(value)
-        self.errcode = self.msx_lib.MSXsetconstant(index, value)
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXsetparameter(self, obj_type, index, param, value):
-        """ Assigns a value to a particular reaction parameter for a given pipe
-            or tank within the pipe network
-            msx.MSXsetparameter(obj_type, index, param, value)
-            msx.MSXsetparameter(1,1,1,15)
-            Parameters:
-                 obj_type: is type of object being queried and must be either:
-                    MSX_NODE (defined as 0) for a node or
-                    MSX_LINK (defined as 1) for a link
-
-               index: is the internal sequence number (starting from 1)
-                      assigned to the node or link
-
-               param: the sequence number of the parameter (starting from 1
-                      as listed in the MSX input file)
-
-               value: the value to be assigned to the parameter for the node or
-                      link of interest.                 """
-        value = c_double(value)
-        self.errcode = self.msx_lib.MSXsetparameter(obj_type, index, param, value)
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXsetinitqual(self, obj_type, index, species, value):
-        """  Assigns an initial concetration of a particular chemical species
-             node or link of the pipe network
-             msx.MSXsetinitqual(obj_type, index, species, value)
-             msx.MSXsetinitqual(1,1,1,15)
-             Parameters:
-                 type: type of object being queried and must be either :
-                       MSX_NODE(defined as 0) for a node or
-                       MSX_LINK(defined as 1) for a link
-                 index: integer -> the internal sequence number (starting from 1)
-                        assigned to the node or link
-
-                 species: the sequence number of the species (starting from 1 as listed in
-                 MASx input file)
-
-                 value: float -> the initial concetration of the species to be applied at the node or link
-                        of interest.
-                 """
-
-        value = c_double(value)
-        self.errcode = self.msx_lib.MSXsetinitqual(obj_type, index, species, value)
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXsetpattern(self, index, factors, nfactors):
-        """Assigns a new set of multipliers to a given MSX source time pattern
-            MSXsetpattern(index,factors,nfactors)
-
-            Parameters:
-                index: the internal sequence number (starting from 1)
-                       of the pattern as it appers in the MSX input file
-                factors: an array of multiplier values to replace those previously used by
-                         the pattern
-                nfactors: the number of entries in the multiplier array/ vector factors"""
-        if isinstance(index, int):
-            index = c_int(index)
-        nfactors = c_int(nfactors)
-        DoubleArray = c_double * len(factors)
-        mult_array = DoubleArray(*factors)
-        self.errcode = self.msx_lib.MSXsetpattern(index, mult_array, nfactors)
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXsetpatternvalue(self, pattern, period, value):
-        """Assigns a new value to the multiplier for a specific time period
-                      in a given MSX source time pattern.
-            msx.MSXsetpatternvalue(pattern, period, value)
-            msx.MSXsetpatternvalue(1,1,10)
-           Parameters:
-               pattern: the internal sequence number (starting from 1) of the
-               pattern as it appears in the MSX input file.
-
-               period: the time period (starting from 1) in the pattern to be replaced
-               value:  the new multiplier value to use for that time period."""
-        value = c_double(value)
-        self.errcode = self.msx_lib.MSXsetpatternvalue(pattern, period, value)
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXsolveQ(self):
-        """ Solves for water quality over the entire simulation period
-            and saves the results to an internal scratch file
-            msx.MSXsolveQ()"""
-        self.errcode = self.msx_lib.MSXsolveQ()
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXsolveH(self):
-        """ Solves for system hydraulics over the entire simulation period
-            saving results to an internal scratch file
-            msx.MSXsolveH() """
-        self.errcode = self.msx_lib.MSXsolveH()
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXaddpattern(self, pattern_id):
-        """Adds a newm empty MSX source time pattern to an MSX project
-                MSXaddpattern(pattern_id)
-            Parameters:
-                pattern_id: the name of the new pattern """
-        self.errcode = self.msx_lib.MSXaddpattern(pattern_id.encode("utf-8"))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXusehydfile(self, filename):
-        """             """
-        self.errcode = self.msx_lib.MSXusehydfile(filename.encode())
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXstep(self):
-        """Advances the water quality solution through a single water quality time
-           step when performing a step-wise simulation
-
-           t, tleft = MSXstep()
-           Returns:
-               t : current simulation time at the end of the step(in secconds)
-               tleft: time left in the simulation (in secconds)
-           """
-        if platform.system().lower() in ["windows"]:
-            t = c_double()
-            tleft = c_double()
-        else:
-            t = c_double()
-            tleft = c_long()
-        self.errcode = self.msx_lib.MSXstep(byref(t), byref(tleft))
-
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-        return t.value, tleft.value
-
-    def MSXinit(self, flag):
-        """Initialize the MSX system before solving for water quality results
-           in the step-wise fashion
-
-           MSXinit(flag)
-
-           Parameters:
-               flag:  Set the flag to 1 if the water quality results should be saved
-                      to a scratch binary file, or 0 if not
-           """
-        self.errcode = self.msx_lib.MSXinit(flag)
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXreport(self):
-        """ Writes water quality simulations results as instructed by
-            MSX input file to a text file.
-            msx.MSXreport()"""
-        self.errcode = self.msx_lib.MSXreport()
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-
-    def MSXgetqual(self, type, index, species):
-        """Retrieves a chemical species concentration at a given node
-           or the average concentration along a link at the current sumulation
-           time step.
-
-           MSXgetqual(type, index, species)
-
-           Parameters:
-               type: type of object being queried and must be either:
-                    MSX_NODE ( defined as 0) for a node,
-                    MSX_LINK (defined as 1) for a link
-               index: then internal sequence number (starting from 1)
-                      assigned to the node or link.
-               species is the sequence number of the species (starting from 1
-               as listed in the MSX input file)
-
-           Returns:
-               The value of the computed concentration of the species at the current
-               time period.
+            linkID = '10'
+            x = [ 22,24, 28]
+            y = [ 30,68, 69]
+            d.setLinkVertices(linkID, x, y)
+            x = d.getLinkVertices()
+            d.setVertex(1,1,1,1)
+            x = d.getLinkVertices()
+            print(x)
         """
 
-        value = 0
-        value = c_double(value)
-        self.errcode = self.msx_lib.MSXgetqual(type, index, species, byref(value))
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
-        return value.value
+        errcode = self.api.ENsetvertex(index, vertex, x, y)
+        return errcode
 
-    def MSXsetsource(self, node, species, type, level, pat):
-        """"Sets the attributes of an external source of particular chemical
-            species to specific node of the pipe network
-            msx.setsource(node, species, type, level, pat)
-            msx.MSXsetsource(1,1,3,10.565,1)
+    def getControlState(self, index=None):
+        """
+            Purpose:
+                Retrieves the enabled state of a specified control in the EPANET model.
+
             Parameters:
-                node: the internal sequence number (starting from1) assigned
-                      to the node of interest.
+                index (int): The index of the control to check, starting from 1.
 
-                species: the sequence number of the species of interest (starting
-                         from 1 as listed in the MSX input file)
+            Returns:
+                int: The state of the control:
+                    - 0: Control is disabled (False)
+                    - 1: Control is enabled (True)
 
-                type: the type of external source to be utilized and will be one of
-                      the following predefined constants:
-                      MSX_NOSOURCE (defined as -1) for no source
-                      MSX_CONCEN (defined as 0) for a concetration source
-                      MSX_MASS (defined as 1) for a mass booster source
-                      MSX_SETPOINT (defined as 2) for a setpoint source
-                      MSX_FLOWPACE (defined as 3) for a flow paced source
+            Example Usage:
+                inpfile = "Net1.inp"
+                d = epanet(inpfile)
 
-                level: the baseline concetration (or mass flow rate) of the source
+                # Retrieve and print the state of the control at index 1
+                x = d.getControlState(1)
+                print(f"Control state: {x}")
 
-                pat: the index of the time pattern used to add variability to the
-                     source's baseline level ( use 0 if the source has a constant strength)     """
-        level = c_double(level)
+            Example Usage with all items:
+                inpfile = "Net1.inp"
+                d = epanet(inpfile)
 
-        pat = c_int(pat)
-        type = c_int(type)
-        self.errcode = self.msx_lib.MSXsetsource(node, species, type, level, pat)
-        if self.errcode:
-            Warning(self.MSXerror(self.errcode))
+                # Retrieve and print the state of the control at index 1
+                x = d.getControlState()
+                print(f"Control state: {x}")
+            """
+        if index == None:
+            enablelist = []
+            iterations = self.getControlCount()
+            for i in range(1, iterations + 1):
+                enabled = self.api.ENgetcontrolenabled(i)
+                enablelist.append(enabled)
+            return enablelist
+        else:
+            enabled = self.api.ENgetcontrolenabled(index)
+        return enabled
 
-    def MSXgeterror(self, err):
-        """Returns the text for an error message given its error code.
-        msx.MSXgeterror(err)
-        msx.MSXgeterror(516)
+    def setControlEnabled(self, index, enabled):
+        """
+    Purpose:
+        Sets the control state to either enable or disable in the EPANET model.
+
+    Parameters:
+        index (int): The index of the control to be modified, starting from 1.
+
+    Example Usage:
+        inpfile = "Net1.inp"
+        d = epanet(inpfile)
+
+        # Retrieve the current state of the control at index 1
+        x = d.getControlState(1)
+        print(f"Control state before: {x}")
+
+        # Disable the control at index 1
+        d.setControlEnabled(1, 0)
+
+        # Check the state of the control again
+        x = d.getControlState(1)
+        print(f"Control state after: {x}")
+    """
+        errcode = self.api.ENsetcontrolenabled(index, enabled)
+        return errcode
+
+    def getRuleEnabled(self, index=None):
+        """
+           Purpose:
+               Retrieves the enabled state of a specific rule in the EPANET model.
+
+           Parameters:
+               index (int): The index of the rule to check, starting from 1.
+
+           Returns:
+               int: The state of the rule:
+                   - 0: Rule is disabled (False)
+                   - 1: Rule is enabled (True)
+
+           Example Usage:
+               inpfile = "Net1.inp"
+               d = epanet(inpfile)
+
+               # Retrieve and print the current state of the rule at index 1
+               x = d.getRuleEnabled(1)
+               print(f"Rule state: {x}")
+
+           Example Usage with all items:
+           inpfile = "Net1.inp"
+           d = epanet(inpfile)
+
+           # Retrieve and print the current state of the rule at index 1
+           x = d.getRuleEnabled()
+           print(f"Rule state: {x}")
+        """
+        if index == None:
+            enablelist = []
+            iterations = self.getRuleCount()
+            for i in range(1, iterations + 1):
+                enabled = self.api.ENgetruleenabled(i)
+                enablelist.append(enabled)
+            return enablelist
+        enabled = self.api.ENgetruleenabled(index)
+        return enabled
+
+    def setRuleEnabled(self, index, enabled):
+        """
+        Purpose:
+            Enables a specific rule in the EPANET model.
+
         Parameters:
-            err: the code number of an error condition generated by EPANET-MSX
+            index (int): The index of the rule to be modified, starting from 1.
+
+        Example Usage:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            # Retrieve and print the current state of the rule at index 1
+            x = d.getRuleEnabled(1)
+            print(f"Rule state before: {x}")
+
+            # Enable the rule at index 1
+            d.setRuleEnabled(1,1)
+
+            # Retrieve and print the state of the rule again to confirm the change
+            x = d.getRuleEnabled(1)
+            print(f"Rule state after: {x}")
+        """
+        errcode = self.api.ENsetruleenabled(index, enabled)
+        return errcode
+
+    def openX(self, inpFile, rptFile, outFile):
+        """Enable the opening of input files with formatting errors"""
+        self.api.ENopenX(inpFile, rptFile, outFile)
+
+    def loadPatternFile(self, filename, id):
+        """/*----------------------------------------------------------------
+        **  Input:   filename =  name of the file containing pattern data
+        **           id = ID for the new pattern
+        **  Purpose: loads time patterns from a file into a project under a specific pattern ID
+        **----------------------------------------------------------------"""
+        self.api.ENloadpatternfile(filename, id)
+
+    def getLinkValues(self, property):
+        """
+    Purpose:
+        Retrieves property values for all links within the EPANET model during a hydraulic analysis.
+
+    Example Usage:
+        from epyt import epanet
+
+        inpfile = "Net1.inp"
+        d = epanet(inpfile)
+
+        d.openHydraulicAnalysis()
+        d.initializeHydraulicAnalysis()
+
+        tstep = 1
+        P, T_H, D, H, F, S = [], [], [], [], [], []
+
+        while tstep > 0:
+            t = d.runHydraulicAnalysis()
+            S.append(d.getLinkValues(d.ToolkitConstants.EN_FLOW))
+            F.append(d.getLinkFlows())
+            T_H.append(t)
+
+            print(F)
+            print(S)
+            print(T_H)
+
+            tstep = d.nextHydraulicAnalysisStep()
+
+        d.closeHydraulicAnalysis()"""
+        values = self.api.ENgetlinkvalues(property)
+        return values
+
+    def getLinkValveCurveGPV(self, *argv):
+        """
+        Retrieves the valve curve for a specified pressure control valve (GPV).
 
         Returns:
-            errmsg: the text of the error message corresponding to the error code"""
-        errmsg = create_string_buffer(80)
-        e = self.msx_lib.MSXgeterror(err, errmsg, 80)
+            int: 1 if the link is a GPV, 0 if it is not.
 
-        # if e:
-        #     # Warning(errmsg.value.decode())
-        #     print(f"{red}EPANET Error: {errmsg.value.decode()}{reset}")
-        return errmsg.value.decode()
+        Example for one Valve:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            linkid = d.getLinkPipeNameID(1)
+            condition = 1
+            index = d.setLinkTypeValveGPV(linkid, condition)
+            d.setLinkValveCurveGPV(index,1)
+            x = d.getLinkValveCurveGPV(index)
+            print(x)
+
+        Example for all Valves:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            linkid = d.getLinkPipeNameID(1)
+            condition = 1
+            index = d.setLinkTypeValveGPV(linkid, condition)
+            d.setLinkValveCurveGPV(index,1)
+            x = d.getLinkValveCurveGPV()
+            print(x)
+                """
+        values = self.__getLinkInfo(self.ToolkitConstants.EN_GPV_CURVE, *argv)
+        return values
+
+    def getLinkValveCurvePCV(self, *argv):
+        """
+        Retrieves the valve curve for a specified pressure control valve (PCV).
+
+        Returns:
+            int: 1 if the link is a PCV, 0 if it is not.
+
+        Example for one Valve:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            linkid = d.getLinkPipeNameID(1)
+            condition = 1
+            index = d.setLinkTypeValvePCV(linkid, condition)
+            d.setLinkValveCurvePCV(index,1)
+            x = d.getLinkValveCurvePCV(index)
+            print(x)
+
+        Example for all Valves:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            linkid = d.getLinkPipeNameID(1)
+            condition = 1
+            index = d.setLinkTypeValvePCV(linkid, condition)
+            d.setLinkValveCurvePCV(index,1)
+            x = d.getLinkValveCurvePCV()
+            print(x)
+        """
+
+        values = self.__getLinkInfo(self.ToolkitConstants.EN_PCV_CURVE, *argv)
+
+        return values
+
+    def setLinkValveCurveGPV(self, index, value):
+        """
+         Sets the valve curve for a specified pressure control valve (GPV).
+
+        Parameters:
+            index (int): The index of the GPV to be set. (starting from 1)
+            value (float): The value to set for the valve curve. (1 for valve to be GPV 0 for not)
+
+        Example:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            linkid = d.getLinkPipeNameID(1)
+            condition = 1
+            index = d.setLinkTypeValveGPV(linkid, condition)"""
+        self.api.ENsetlinkvalue(index, self.ToolkitConstants.EN_GPV_CURVE, value)
+
+    def setLinkValveCurvePCV(self, index, value):
+        """
+         Sets the valve curve for a specified pressure control valve (PCV).
+
+        Parameters:
+            index (int): The index of the PCV to be set. (starting from 1)
+            value (float): The value to set for the valve curve. (1 for valve to be GPV 0 for not)
+
+        Example:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            linkid = d.getLinkPipeNameID(1)
+            condition = 1
+            index = d.setLinkTypeValvePCV(linkid, condition)
+        """
+        return self.api.ENsetlinkvalue(index, self.ToolkitConstants.EN_PCV_CURVE, value)
+
+    def getOptionsDemandPattern(self):
+        """Retrieves the default Demand pattern.
+
+        Example:
+                inpfile = "Richmond_standard.inp"
+                d = epanet(inpfile)
+                d.printv(d.getOptionsDemandPattern())"""
+
+        return self.api.ENgetoption(self.ToolkitConstants.EN_DEMANDPATTERN)
+
+    def setOptionsDemandPattern(self, value):
+        """ Retrieves the default Demand pattern.
+
+        Example:
+                inpfile = "Richmond_standard.inp"
+                d = epanet(inpfile)
+                d.setOptionsDemandPattern(3)
+                d.printv(d.getOptionsDemandPattern())"""
+        self.api.ENsetoption(self.ToolkitConstants.EN_DEMANDPATTERN, value)
+
+    def getOptionsEmitterBackFlow(self):
+        """
+        Retrieves the current setting for allowing reverse flow through emitters.
+
+        Example:
+            inpfile = "Richmond_standard.inp"
+            d = epanet(inpfile)
+            d.printv(d.getOptionsEmitBackFlow())
+
+        Returns:
+            int: 1 if reverse flow is allowed (default), 0 if not.
+        """
+        return int(self.api.ENgetoption(self.ToolkitConstants.EN_EMITBACKFLOW))
+
+    def setOptionsEmitterBackFlowAllowed(self):
+        """
+        Sets the option to allow reverse flow through emitters.
+
+        Example:
+            inpfile = "Richmond_standard.inp"
+            d = epanet(inpfile)
+            d.setOptionsEmitBackFlowAllowed()
+            d.printv(d.getOptionsEmitBackFlow())
+        """
+        self.api.ENsetoption(self.ToolkitConstants.EN_EMITBACKFLOW, 1)
+
+    def setOptionsEmitterBackFlowDisallowed(self):
+        """
+        Sets the option  prevent reverse flow through emitters.
+
+        Example:
+            inpfile = "Richmond_standard.inp"
+            d = epanet(inpfile)
+            d.setOptionsEmitBackFlow(0)
+            d.printv(d.getOptionsEmitBackFlow())
+        """
+        self.api.ENsetoption(self.ToolkitConstants.EN_EMITBACKFLOW, 0)
+
+    def getLinkLeakArea(self, *argv):
+        """
+        Function to retrieve the leak area for a specified link (pipe).
+
+        Returns:
+        float: The current leak area value for the specified link.
+
+        Example 1 Retrieving all Links:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+            d.setLinkLeakArea(2,10.5)
+            x = d.getLinkLeakArea()
+            print(x)
+
+        Example 2 Retrieving one link:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+            d.setLinkLeakArea(2,10.5)
+            x = d.getLinkLeakArea(2)
+            print(x)
+
+        See also: setLinkLeakArea
+        """
+        return self.__getLinkInfo(self.ToolkitConstants.EN_LEAK_AREA, *argv)
+
+    def getLinkExpansionProperties(self, *argv):
+        """
+        Function to retrieve the expansion properties for a specified link (pipe).
+
+        Returns:
+        float: The current expansion property value for the specified link.
+
+        Example 1 Retrieving all link expansion properties:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+            d.setLinkExpansionProperties(5,2)
+            x = d.getLinkExpansionProperties()
+            print(x)
+
+        Example 2 Retrieving one link expansion property:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+            d.setLinkExpansionProperties(5,2)
+            x = d.getLinkExpansionProperties(5)
+            print(x)
+
+        See also : setLinkExpansionProperties()
+            """
+        return self.__getLinkInfo(self.ToolkitConstants.EN_LEAK_EXPAN, *argv)
+
+    def setLinkLeakArea(self, index, value):
+        """
+        Function to set the leak area    for a specified link (pipe).
+
+        input:
+            index(int) : The index of the link(pipe) for which to set the leak area (starting from 1)
+            value (float) : the value to assign as the leak area to the specified link
+
+        Example:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            d.setLinkLeakArea(2,10.5)
+            x = d.getLinkLeakArea()
+            print(x)
+
+        See also: getLinkLeakArea
+        """
+        self.api.ENsetlinkvalue(index, self.ToolkitConstants.EN_LEAK_AREA, value)
+
+    def setLinkExpansionProperties(self, index, value):
+        """
+        Function to set the expansion properties for a specified link (pipe).
+
+        Input:
+        index (int): The index of the link (pipe) for which to set the expansion properties. (starting from 1)
+        value (float): The value to assign as the expansion property for the specified link.
+
+        Example:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            d.setLinkExpansionProperties(5,2)
+            x = d.getLinkExpansionProperties()
+            print(x)
+
+        See also:
+            getLinkExpansionProperties
+        """
+        self.api.ENsetlinkvalue(index, self.ToolkitConstants.EN_LEAK_EXPAN, value)
+
+    def getLinkLeakageRate(self, *argv):
+        """
+            Retrieves the leakage rate of a specific pipe (link) at a given point in time.
+
+            Returns:
+                float: The leakage rate of the specified pipe at the requested time point
+            """
+        return self.__getLinkInfo(self.ToolkitConstants.EN_LINK_LEAKAGE, *argv)
+
+    def getConsumerDemandRequested(self, index):
+        """
+            Retrieves the requested consumer demand for a specific node.
+
+            Args:
+                index (int): The index of the node for which the consumer demand is to be retrieved.
+
+            Returns:
+                float: The full demand requested by the consumer at the specified node
+            """
+        return self.api.ENgetnodevalue(index, self.ToolkitConstants.EN_FULLDEMAND)
+
+    def getConsumerDemandDelivered(self, index):
+        """
+            Retrieves the delivered consumer demand for a specific node.
+
+            Args:
+                index (int): The index of the node for which the delivered consumer demand is to be retrieved.
+
+            Returns:
+                float: The amount of demand delivered to the consumer at the specified node
+            """
+        return self.api.ENgetnodevalue(index, self.ToolkitConstants.EN_DEMANDFLOW)
+
+    def getNodeLeakageFlow(self, index):
+        """
+            Retrieves the leakage flow for a specific node.
+
+            Args:
+                index (int): The index of the node for which the leakage flow is to be retrieved.
+
+            Returns:
+                float: The amount of leakage flow at the specified node
+            """
+        return self.api.ENgetnodevalue(index, self.ToolkitConstants.EN_LEAKAGEFLOW)
+
+    def _isConnected(self):
+        """Checks if the water network is fully connected"""
+        matrix = self.getConnectivityMatrix()
+        n = len(matrix)
+        visited = [False] * n
+
+        def _dfs(node):
+            visited[node] = True
+            for neighbor in range(n):
+                if matrix[node][neighbor] == 1 and not visited[neighbor]:
+                    _dfs(neighbor)
+
+        _dfs(1)
+        if all(visited):
+            return True
+        else:
+            return False
+
+    def getTimetoNextEvent(self):
+        """
+        Determines the type of event that will cause the end of the current time step,
+        along with the duration until the event occurs and its index.
+
+        Returns:
+            x (str): The type of the next event (e.g., REPORT, HYD, WQ, TANK, CONTROL).
+            y (float): The duration of time until the next event occurs.
+            z (int): The index of the event.
+
+        Event Types:
+            0: REPORT   - A report generation event.
+            1: HYD      - A hydraulic event.
+            2: WQ       - A water quality event.
+            3: TANK     - A tank level event.
+            4: CONTROL  - A control rule event. """
+        x, y, z = self.api.ENtimetonextevent()
+        if x == 0:
+            x = "REPORT"
+        if x == 1:
+            x = "HYD"
+        if x == 2:
+            x = "WQ"
+        if x == 3:
+            x = "TANK"
+        if x == 4:
+            x = "CONTROL"
+        return x, y, z
+
+    def getLinkInControl(self, *args):
+        """
+        Function to determine wether a link apperas in any simple or rule based control
+
+        Return: (int) 1 if the link has control, 0 otherwise
+
+        Example 1 Retrieving one Link:
+            inpfile = "Net1.inp"
+
+            d = epanet(inpfile)
+            linkcontrolid = d.getControls(1).LinkID
+            linkcontrolindex = d.getLinkIndex(linkcontrolid)
+            x = d.getLinkInControl(linkcontrolindex)
+            print(x)                   # it will return 1
+
+        Example 2 Retrieving all Links:
+            inpfile = "Net1.inp"
+
+            d = epanet(inpfile)
+            x = d.getLinkInControl()
+            print(x)
+
+        Example 3 Retrieving more than one link:
+            inpfile = "Net1.inp"
+
+            d = epanet(inpfile)
+            x = d.getLinkInControl(1,2,3,13) #Link with index 13 is the one with control in Net1
+            print(x)
+
+        Example 4 Retrieving more than one link using list:
+            inpfile = "Net1.inp"
+
+            d = epanet(inpfile)
+            x = d.getLinkInControl([1,2,3,13])
+            print(x)
+        """
+        if not args:
+            values = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_LINK_INCONTROL)
+            results = [int(x) for x in values]
+            return results
+
+        if len(args) == 1:
+            if isinstance(args[0], list):  # If the single argument is a list
+                results = []
+                for index in args[0]:  # Loop through the list of indices
+                    results.append(int(self.api.ENgetlinkvalue(index, self.ToolkitConstants.EN_LINK_INCONTROL)))
+                return results
+            else:  # If it's a single index (not a list)
+                index = args[0]
+                return int(self.api.ENgetlinkvalue(index, self.ToolkitConstants.EN_LINK_INCONTROL))
+        # More than one argument provided
+        results = []
+        for index in args:
+            results.append(int(self.api.ENgetlinkvalue(index, self.ToolkitConstants.EN_LINK_INCONTROL)))
+        return results
+
+    def getNodeInControl(self, *args):
+        """
+        Function to determine wether a node apperas in any simple or rule based control
+
+        Return: (int) 1 if the Node has control, 0 otherwise
+
+        Example 1 Retrieving one Node:
+            inpfile = "Net1.inp"
+
+            d = epanet(inpfile)
+            nodecontrolid = d.getControls(1).NodeID
+            nodecontrolindex = d.getNodeIndex(nodecontrolid)
+            x = d.getNodeInControl(nodecontrolindex)
+            print(x)            # it will return 1
+
+        Example 2 Retrieving all Nodes:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            x = d.getNodeInControl()
+            print(x)
+
+        Example 3 Retrieving more than one Node:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            x = d.getNodeInControl(1, 2, 3, 9) #Node with index 9 is the one with control in Net1
+            print(x)
+
+        Example 4 Retrieving more than one link using list:
+            inpfile = "Net1.inp"
+            d = epanet(inpfile)
+
+            x = d.getNodeInControl([1, 2, 3, 9])
+            print(x)
+        """
+        results = []
+
+        if not args:
+            results = self.api.ENgetnodevalues(self.ToolkitConstants.EN_NODE_INCONTROL)
+            results = [int(i) for i in results]
+            return results
+
+        if len(args) == 1:
+            if isinstance(args[0], list):  # If the single argument is a list
+                for index in args[0]:
+                    results.append(int(self.api.ENgetnodevalue(index, self.ToolkitConstants.EN_NODE_INCONTROL)))
+                return results
+            else:  # If it's a single index (not a list)
+                index = args[0]
+                return int(self.api.ENgetnodevalue(index, self.ToolkitConstants.EN_NODE_INCONTROL))
+        for index in args:
+            results.append(int(self.api.ENgetnodevalue(index, self.ToolkitConstants.EN_NODE_INCONTROL)))
+        return results
+
+    def _ErrorinChangingMetric(self, wanted, nameofFunction):
+        "Checks if the metric change is not possible and suggest possbile solutions"
+        red_text = "\033[91m"
+        reset_text = "\033[0m"
+        current = self._FlowUnitsCheck()
+        if current == "PSI" and wanted == "KPA AND METERS":
+            print(
+                f"{red_text}UserWarning: Error in function: {nameofFunction}, the function didnt change the metric Please change"
+                f" the metric using one of the following:\n "
+                f"1. setFlowUnitsCMH() ->  Cubic meters per hour \n"
+                f" 2. setFlowUnitsCMS() ->  Cubic meters per second \n"
+                f" 3. setFlowUnitsMLD() ->  Million liters per day \n"
+                f" 4. setFlowUnitsCMD() ->  Cubic meters per day \n"
+                f" 5. setFlowUnitsLPS() ->  Liters per second \n"
+                f" 6. setFlowUnitsLPM() ->  Liters per minute {reset_text}")
+        else:
+            if current == "KPA AND METERS" and wanted == "PSI":
+                print(
+                    f"{red_text}UserWarning: Error in function: {nameofFunction}, the function didnt change the metric, Please change"
+                    f" the metric using one of the following:\n"
+                    f" 1. setFlowUnitsAFD() ->  Acre-feet per day \n"
+                    f" 2. setFlowUnitsIMGD()->  Imperial million gallons per day \n"
+                    f" 3. setFlowUnitsCFS() ->  Cubic feet per second \n"
+                    f" 4. setFlowUnitsMGD() ->  Million gallons per day \n"
+                    f" 5. setFlowUnitsGPM() ->  Gallons per minute \n{reset_text}")
+
+    def _FlowUnitsCheck(self):
+        "Returns the Metric of the system"
+        flowunits = self.getFlowUnits()
+        if flowunits == "MDG" or flowunits == "IMGD" or flowunits == "CFS" or flowunits == "CFS" or flowunits == "GPM":
+            return "PSI"
+        else:
+            if (
+                    flowunits == "CMH" or flowunits == "CMS" or flowunits == "MLD" or flowunits == "CMD" or flowunits == "LPS" or
+                    flowunits == "LPM"):
+                return "KPA AND METERS"
+            else:
+                return "UNKNOWN"
+
+    def exportMSXts(self, results, output_file='computedtoexcel.xlsx', selected_nodes=None,
+                    selected_species=None,
+                    header=True):
+        """
+        Exports multi-species water-quality time-series results (from an EPANET-MSX
+    simulation) to an Excel workbook—one sheet per species.
+
+    Parameters:
+    ----------
+        results : obj
+            A results object returned by `getMSXComputedQualityNode`.
+            It must expose ``Time`` (1-D array-like) and ``Quality``
+        output_file : str, default ``"computedtoexcel.xlsx"``
+            Name (or path) for the Excel file to create. “.xlsx” is appended
+            automatically when omitted.
+        selected_nodes : list[str | int] | None, default ``None``
+            Node IDs or zero-based node indices to include.
+            • ``None``  → export **all** nodes.
+            • Strings   → treated as node IDs.
+            • Integers  → treated as node indices.
+        selected_species : list[str | int] | None, default ``None``
+            Species names or zero-based species indices to include.
+            Same ID / index rules as *selected_nodes*.
+        header : bool, default ``True``
+            Write column headers (“NODE INDEX”, “NODE ID”, time steps …).
+            If ``False``, headers are suppressed and the first data row is
+            removed—useful for appending to an existing sheet.
+
+        Simple Example with all nodes and species:
+            G = epanet("net2-cl2.inp")
+            G.loadMSXFile("net2-cl2.msx")
+            MSX_comp = G.getMSXComputedQualityNode()
+            G.exportMSXts(MSX_comp, "net2")
+            G.exportMSXstatistics("net2","summarynet2")
+
+        Advanced Examples:
+            G = epanet("net2-cl2.inp")
+            G.loadMSXFile("net2-cl2.msx")
+
+            # Run MSX simulation and grab node-quality results
+            msx_results = G.getMSXComputedQualityNode()
+
+            # 1) Export every species for every node (default behaviour)
+            G.exportMSXts(msx_results, "net2_full.xlsx")
+
+            # 2) Export only chlorine for two specific nodes, keep headers
+            G.exportMSXts(
+                    MSX_comp,
+                    output_file="chlorine_subset.xlsx",
+                    selected_nodes=["10", "15"], #select nodes by their id
+                    selected_species=["CL2"]
+                )
+
+
+            G.exportMSXts(
+                            MSX_comp,
+                            output_file="chlorine_subset1.xlsx",
+                            selected_nodes=[9, 14], #select node by their index
+                            selected_species=["CL2"]
+                        )
+
+            # 3) Export species index 0 for nodes 0-4, omit headers
+            G.exportMSXts(
+                msx_results,
+                "first_species_nodes0to4.xlsx",
+                selected_nodes=list(range(5)),
+                selected_species=[0],  #select specie by its index
+                header=False
+
+        """
+        if not output_file.endswith('.xlsx'):
+            output_file += '.xlsx'
+
+        if not hasattr(results, 'Time') or not hasattr(results, 'Quality'):
+            raise ValueError("Simulation results are not properly initialized or run.")
+
+        time_data = results.Time
+        species_list = self.getMSXSpeciesNameID()
+
+        node_ids = self.getNodeNameID()
+        node_indices = list(range(len(node_ids)))
+
+        if selected_nodes:
+            selected_node_indices = []
+            for node in selected_nodes:
+                if isinstance(node, str):  # Node ID
+                    if node in node_ids:
+                        selected_node_indices.append(node_ids.index(node))
+                    else:
+                        raise ValueError(f"Node ID '{node}' not found.")
+                elif isinstance(node, int):  # Node index
+                    if 0 <= node < len(node_ids):
+                        selected_node_indices.append(node)
+                    else:
+                        raise ValueError(f"Node index '{node}' is out of range.")
+                else:
+                    raise ValueError(f"Invalid node identifier: {node}")
+        else:
+            selected_node_indices = node_indices
+
+        if selected_species:
+            selected_species_indices = []
+            for species in selected_species:
+                if isinstance(species, str):  # Species name
+                    if species in species_list:
+                        selected_species_indices.append(species_list.index(species))
+                    else:
+                        raise ValueError(f"Species name '{species}' not found.")
+                elif isinstance(species, int):  # Species index
+                    if 0 <= species < len(species_list):
+                        selected_species_indices.append(species)
+                    else:
+                        raise ValueError(f"Species index '{species}' is out of range.")
+                else:
+                    raise ValueError(f"Invalid species identifier: {species}")
+        else:
+            selected_species_indices = list(range(len(species_list)))
+
+        with pd.ExcelWriter(output_file, engine='xlsxwriter') as writer:
+            node_keys = list(results.Quality.keys())
+
+            for species_index in selected_species_indices:
+                species_name = species_list[species_index]
+                species_data = []
+
+                for node_index in selected_node_indices:
+                    node_key = node_keys[node_index]
+                    quality_data = np.array(results.Quality[node_key])
+
+                    # If quality_data has an extra leading dimension
+                    if quality_data.ndim == 3 and quality_data.shape[0] == 1:
+                        quality_data = quality_data[0]
+
+                    num_timesteps = len(time_data)
+                    num_species = len(species_list)
+                    expected_shape = (num_timesteps, num_species)
+
+                    if quality_data.shape != expected_shape:
+                        raise ValueError(
+                            f"Node {node_key}: quality_data does not match expected shape {expected_shape}. "
+                            f"Actual shape: {quality_data.shape}"
+                        )
+                    species_data.append(quality_data[:, species_index])
+
+                species_data_array = np.array(species_data)
+
+                df = pd.DataFrame(species_data_array, columns=time_data,
+                                  index=[node_ids[i] for i in selected_node_indices])
+                df.insert(0, 'NODE INDEX', [node_indices[i] for i in selected_node_indices])
+                df.insert(1, 'NODE ID', [node_ids[i] for i in selected_node_indices])
+
+                # If header is False, remove the first data row from df
+                if not header and len(df) > 0:
+                    df = df.iloc[1:].copy()
+
+                sheet_name = f"{species_name}"
+                # If header=False, no column headers will be written to the Excel sheet.
+                df.to_excel(writer, index=False, sheet_name=sheet_name, header=header)
+
+                worksheet = writer.sheets[sheet_name]
+                worksheet.set_column('A:A', 13.0)
+
+        print(f"Data successfully written to {output_file}")
+
+    def exportMSXstatistics(self, input_path, output_path="summary_output.xlsx", nodeids=True, nodeindex=True):
+        """
+        Summarizes min, max, and average values for each node in an Excel file with a specific structure.
+
+        Parameters:
+            input_path (str): Path to the input Excel file.
+            output_path (str): Path to save the output summary Excel file.
+            nodeids (bool): Include node IDs (from column 1) in the summary.
+            nodeindex (bool): Include node index (from column 0) in the summary.
+
+        Simple Example with all nodes and species:
+            G = epanet("net2-cl2.inp")
+            G.loadMSXFile("net2-cl2.msx")
+            MSX_comp = G.getMSXComputedQualityNode()
+            G.exportMSXts(MSX_comp, "net2")
+            G.exportMSXstatistics("net2","summarynet2")
+
+        # Example usage:
+        exportMSXstatistics("outexcel3.xlsx","summary_output1.xlsx", nodeids=True, nodeindex=False)  # Only node IDs
+        exportMSXstatistics("outexcel3.xlsx", "summary_output2.xlsx",nodeids=False, nodeindex=True)  # Only node indices
+        exportMSXstatistics("outexcel3.xlsx","summary_output3.xlsx", nodeids=True, nodeindex=True)   # Both
+        """
+        if not input_path.endswith('.xlsx'):
+            input_path += '.xlsx'
+
+        if not output_path.endswith('.xlsx'):
+            output_path += '.xlsx'
+        xls = pd.ExcelFile(input_path)
+        output_data = {}
+
+        for sheet in xls.sheet_names:
+            df = xls.parse(sheet, header=None)
+
+            data = df.iloc[1:].reset_index(drop=True)
+
+            summary_rows = []
+
+            for _, row in data.iterrows():
+                index = int(row[0])
+                node_id = str(row[1])
+                values = pd.to_numeric(row[2:], errors='coerce').dropna()
+
+                if values.empty:
+                    continue
+
+                summary = {
+                    'Min': values.min(),
+                    'Max': values.max(),
+                    'Mean': values.mean()
+                }
+
+                if nodeids:
+                    summary['NodeID'] = node_id
+                if nodeindex:
+                    summary['NodeIndex'] = index
+
+                ordered_summary = {}
+                if nodeids:
+                    ordered_summary['NodeID'] = summary['NodeID']
+                if nodeindex:
+                    ordered_summary['NodeIndex'] = summary['NodeIndex']
+                ordered_summary['Min'] = summary['Min']
+                ordered_summary['Max'] = summary['Max']
+                ordered_summary['Mean'] = summary['Mean']
+
+                summary_rows.append(ordered_summary)
+
+            output_data[sheet] = pd.DataFrame(summary_rows)
+
+        with pd.ExcelWriter(output_path) as writer:
+            for sheet_name, df in output_data.items():
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+        print(f"Summary saved to: {output_path}")

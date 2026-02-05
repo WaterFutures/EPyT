@@ -55,19 +55,19 @@ setup(
     packages=packages,
     keywords='epanet, water, networks, hydraulics, quality, simulations, emt, epanet matlab toolkit',
     classifiers=[
-        'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
         'Programming Language :: Python :: 3.12',
         'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
         'Programming Language :: Python',
         'License :: OSI Approved :: European Union Public Licence 1.2 '
         '(EUPL 1.2)',
         'Operating System :: OS Independent',
     ],
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     package_data={f'{module_name}': data},
-    install_requires=['numpy', 'matplotlib', 'pandas', 'xlsxwriter', 'setuptools'],
+    install_requires=['cffi>=2.0.0', 'numpy>=1.24.4', 'matplotlib>=3.7.5', 'pandas>=2.0.3', 'XlsxWriter>=3.2.0', 'setuptools'],
     include_package_data=True
 )
