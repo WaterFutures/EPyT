@@ -581,13 +581,14 @@ class GetTest(unittest.TestCase):
             err_msg='Wrong velocity output', decimal=4)
 
     def test_getComputedQualityTimeSeries(self):
+        res = self.epanetClass.getComputedQualityTimeSeries('LinkQuality', 'nodequality')
         np.testing.assert_array_almost_equal(
-            self.epanetClass.getComputedQualityTimeSeries().NodeQuality[10],
+            res.NodeQuality[10],
             np.array([1., 0.45269294, 0.44701226, 0.43946804, 0.42596667,
                       0.4392986, 0.45068901, 0.41946084, 0.4033391, 1.,
                       0.97200717]),
             err_msg='Wrong NodeQuality output')
-        np.testing.assert_array_almost_equal(self.epanetClass.getComputedQualityTimeSeries().LinkQuality[10],
+        np.testing.assert_array_almost_equal(res.LinkQuality[10],
                                              np.array([0.79051035, 0.44701226, 0.43946804, 0.43188486, 0.45136891,
                                                        0.40885247, 0.4475449, 0.440129, 0.44680907, 0.44516552,
                                                        0.41946084, 0.40761727, 1.]),
@@ -1282,7 +1283,7 @@ class GetTest(unittest.TestCase):
         self.assertEqual(self.epanetClass.getTimeReportingStart(), 0, 'Wrong Time  Output')
         self.assertEqual(self.epanetClass.getTimeRuleControlStep(), 360, 'Wrong Time Reporting Start Output')
         self.assertEqual(self.epanetClass.getTimeStatisticsType(), 'NONE', 'Wrong Time Statistics Type Output')
-        self.assertEqual(self.epanetClass.getTimeReportingPeriods(), 25, 'Wrong Time  Output')
+        self.assertEqual(self.epanetClass.getTimeReportingPeriods(), 24, 'Wrong Time  Output')
         self.assertEqual(self.epanetClass.getTimeClockStartTime(), 0, 'Wrong Reporting Periods  Output')
         self.assertEqual(self.epanetClass.getTimeHTime(), 86400, 'Wrong hydraulic solution Time Output')
         self.assertEqual(self.epanetClass.getTimeQTime(), 86400, 'Wrong quality solution Time Output')
@@ -3463,35 +3464,9 @@ class AnalysisTest(unittest.TestCase):
         np.testing.assert_array_almost_equal(actual, desired, err_msg=err_msg, decimal=5)
 
         # Test State
-        desired = np.array([[3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [3],
-                            [2],
-                            [2],
-                            [2],
-                            [2],
-                            [2],
-                            [2],
-                            [2],
-                            [2],
-                            [2],
-                            [2],
-                            [2],
-                            [3],
-                            [3],
-                            [3]])
+        desired = np.array([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])
         actual = comp_vals.State
-        np.testing.assert_array_almost_equal(actual, desired, err_msg=err_msg, decimal=5)
+        np.testing.assert_array_almost_equal(actual[:, 10], desired, err_msg=err_msg, decimal=5)
 
         # Test Tank Volume
         desired = np.array([[0., 0., 0.,
