@@ -2082,17 +2082,19 @@ class epanet:
 
         nLinks = self.api.ENgetcount(self.ToolkitConstants.EN_LINKCOUNT)
         nNodes = self.api.ENgetcount(self.ToolkitConstants.EN_NODECOUNT)
-        idx = self.getLinkTypeIndex()
-        pipecount = (
-                np.count_nonzero(idx == self.ToolkitConstants.EN_PIPE) +
-                np.count_nonzero(idx == self.ToolkitConstants.EN_CVPIPE)
-        )
-        find_pumps = idx == self.ToolkitConstants.EN_PUMP
-        pumpcount = np.count_nonzero(find_pumps)
+        idxL = self.getLinkTypeIndex()
+        idxL = np.asarray(idxL)
+        pipecount = np.isin(
+            idxL,
+            [self.ToolkitConstants.EN_PIPE, self.ToolkitConstants.EN_CVPIPE]
+        ).sum()
+        pumpcount = (idxL == self.ToolkitConstants.EN_PUMP).sum()
         valvecount = nLinks - pumpcount - pipecount
+        idxN = self.getNodeTypeIndex()
+        idxN = np.asarray(idxN)
         tankrescount = self.api.ENgetcount(self.ToolkitConstants.EN_TANKCOUNT)
         junctioncount = nNodes - tankrescount
-        rescount = np.count_nonzero(idx == self.ToolkitConstants.EN_RESERVOIR)
+        rescount = (idxN == self.ToolkitConstants.EN_RESERVOIR).sum()
         k, tstep = 1, 1
         while tstep > 0:
             t = self.api.ENrunH()
