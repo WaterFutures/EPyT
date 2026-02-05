@@ -2028,12 +2028,17 @@ class epanet:
                      'tankvolume', 'flow', 'velocity', 'headloss', 'status',
                      'setting', 'energy', 'efficiency', 'state', 'linkleakagerate', 'nodeleakageflow', 'emitterflow',
                      'demanddelivered', 'demandrequested']
+        elif len(argv) > 1:
+            attrs = [str(a).strip().lower() for a in argv]
         else:
             x = argv[0]
             if isinstance(x, str):
                 attrs = [x.strip().lower()]
             else:
-                attrs = [str(a).strip().lower() for a in x]
+                try:
+                    attrs = [str(a).strip().lower() for a in x]
+                except TypeError:
+                    attrs = [str(x).strip().lower()]
 
         value.Time = []
         if 'pressure' in attrs:
@@ -2207,12 +2212,17 @@ class epanet:
 
         if len(argv) == 0:
             attrs = ['time', 'nodequality', 'linkquality', 'mass']
+        elif len(argv) > 1:
+            attrs = [str(a).strip().lower() for a in argv]
         else:
             x = argv[0]
             if isinstance(x, str):
                 attrs = [x.strip().lower()]
             else:
-                attrs = [str(a).strip().lower() for a in x]
+                try:
+                    attrs = [str(a).strip().lower() for a in x]
+                except TypeError:
+                    attrs = [str(x).strip().lower()]
 
         attrs = [a.lower() for a in attrs]
 
@@ -2236,7 +2246,7 @@ class epanet:
             if 'nodequality' in attrs:
                 value.NodeQuality[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_QUALITY)
             if 'linkquality' in attrs:
-                value.LinkQuality[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_QUALITY)
+                value.LinkQuality[k] = self.api.ENgetlinkvalues(self.ToolkitConstants.EN_LINKQUAL)
             if 'mass' in attrs:
                 value.MassFlowRate[k] = self.api.ENgetnodevalues(self.ToolkitConstants.EN_SOURCEMASS)
             if 'demand' in attrs:
