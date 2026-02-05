@@ -3,15 +3,14 @@ import unittest
 
 from epyt import epanet, networks
 
-DIRNAME = os.path.dirname(networks.__file__)
-
 
 class update2_3(unittest.TestCase):
 
     def setUp(self):
         """Call before every test case."""
         # Create EPANET object using the INP file
-        inpname = os.path.join(DIRNAME, 'asce-tf-wdst', 'Net1.inp')
+        self.inps = networks.inp_files()
+        inpname = self.inps.Net1
         self.epanetClass = epanet(inpname)
 
     def tearDown(self):

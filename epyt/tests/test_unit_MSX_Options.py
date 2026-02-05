@@ -1,9 +1,6 @@
-import os
 import unittest
 
 from epyt import epanet, networks
-
-DIRNAME = os.path.dirname(networks.__file__)
 
 
 class MSXtest(unittest.TestCase):
@@ -11,10 +8,12 @@ class MSXtest(unittest.TestCase):
     def setUp(self):
         """Call before every test case."""
         # Create EPANET object using the INP file
-        inpname = os.path.join(DIRNAME, 'msx-examples', 'net2-cl2.inp')
-        msxname = os.path.join(DIRNAME, 'msx-examples', 'net2-cl2.msx')
+        self.inps = networks.inp_files()
+        self.msxs = networks.msx_files()
+        inpname = self.inps.net2_cl2
+        msxfile = self.msxs.net2_cl2
         self.epanetClass = epanet(inpname)
-        self.msxClass = self.epanetClass.loadMSXFile(msxname)
+        self.msxClass = self.epanetClass.loadMSXFile(msxfile)
 
     def tearDown(self):
         """Call after every test case."""
@@ -75,13 +74,13 @@ class MSXtest(unittest.TestCase):
 
         self.epanetClass.setMSXCompilerVC()
         self.assertEqual(self.epanetClass.getMSXCompiler(),
-                        "VC", "Wrong get Compiler comments output")
+                         "VC", "Wrong get Compiler comments output")
         self.epanetClass.setMSXCompilerGC()
         self.assertEqual(self.epanetClass.getMSXCompiler(),
-                        "GC", "Wrong get Compiler comments output")
+                         "GC", "Wrong get Compiler comments output")
         self.epanetClass.setMSXCompilerNONE()
         self.assertEqual(self.epanetClass.getMSXCompiler(),
-                        "NONE", "Wrong get Compiler comments output")
+                         "NONE", "Wrong get Compiler comments output")
 
         self.epanetClass.setMSXAtol(0.2)
         self.assertEqual(self.epanetClass.getMSXAtol(),

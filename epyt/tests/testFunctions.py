@@ -2,13 +2,13 @@
 EPANET Python Toolkit (EPyT) Test Part 1
 This file is provided to ensure that all functions can be executed correctly.
 Step-by-step execution. You may also use breakpoints.
-"""
+# """
 from pathlib import Path
 
-from epyt import epanet
+from epyt import epanet, networks
 
 # Create EPANET object using the INP file
-inpname = "Net1.inp"
+inpname = networks.inp_files().Net1
 d = epanet(inpname)  # Net1 Net2 Net3 BWSN_Network_1 ky1 -10
 
 # %% Get/Set Functions

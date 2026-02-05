@@ -4,10 +4,10 @@ This file is provided to ensure that all functions can be executed correctly.
 Step-by-step execution. You may also use the breakpoints,
 indicated with a short dash (-) on the left of each line number.
 """
-from epyt import epanet
+from epyt import epanet, networks
 
 # Create EPANET object using the INP file
-inpname = 'Net1.inp'  # Net1 Net2 Net3 BWSN_Network_1 L-TOWN ky1 -10
+inpname = networks.inp_files().Net1 # Net1 Net2 Net3 BWSN_Network_1 L-TOWN ky10
 d = epanet(inpname)
 
 # *Get Links Data (EXAMPLES)*

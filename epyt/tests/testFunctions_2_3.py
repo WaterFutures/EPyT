@@ -4,10 +4,11 @@ This file is provided to ensure that all functions can be executed correctly.
 Step-by-step execution. You may also use breakpoints.
 """
 
-from epyt import epanet
+from epyt import epanet, networks
 
-inpfile = "Net1.inp"
-d = epanet(inpfile)
+# Create EPANET object using the INP file
+inpname = networks.inp_files().Net1
+d = epanet(inpname)
 # Setcurve
 
 d.setCurveTypePump(1)

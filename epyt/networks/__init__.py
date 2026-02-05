@@ -25,7 +25,7 @@ def _collect_files(ext: str):
 def _safe_attr(name: str) -> str:
     # make a valid python identifier for attribute access
     base = os.path.splitext(os.path.basename(name))[0]
-    base = re.sub(r"\W+", "_", base)          # replace non-word chars
+    base = re.sub(r"\W+", "_", base)  # replace non-word chars
     if not base:
         base = "file"
     if base[0].isdigit():
@@ -35,6 +35,7 @@ def _safe_attr(name: str) -> str:
 
 class NetIndex(dict):
     """dict + attribute access for network file paths."""
+
     def __getattr__(self, item):
         try:
             return self[item]
@@ -47,32 +48,30 @@ class NetIndex(dict):
         return f"NetIndex({len(self)} files: {keys}{more})"
 
 
-def inp_files():
-    paths = _collect_files(".inp")
+def _net_files(ext: str) -> "NetIndex":
+    paths = _collect_files(ext)
     m = NetIndex()
 
     for rel in paths:
+        p = Path(rel)
+        base = p.name
+
         # allow nets["Net2.inp"] exact
-        m[os.path.basename(rel)] = rel
+        m[base] = os.fspath(p)
 
         # allow nets["Net2"] and nets.Net2
-        key = os.path.splitext(os.path.basename(rel))[0]
-        m[key] = rel
+        stem = p.stem
+        m[stem] = os.fspath(p)
 
         # also safe attribute alias (in case of weird names)
-        m[_safe_attr(os.path.basename(rel))] = rel
+        m[_safe_attr(base)] = os.fspath(p)
 
     return m
 
 
-def msx_files():
-    paths = _collect_files(".msx")
-    m = NetIndex()
+def inp_files() -> "NetIndex":
+    return _net_files(".inp")
 
-    for rel in paths:
-        m[os.path.basename(rel)] = rel
-        key = os.path.splitext(os.path.basename(rel))[0]
-        m[key] = rel
-        m[_safe_attr(os.path.basename(rel))] = rel
 
-    return m
+def msx_files() -> "NetIndex":
+    return _net_files(".msx")

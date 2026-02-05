@@ -1,15 +1,13 @@
-import math
 import unittest
 
-from epyt import epanet
+from epyt import epanet, networks
 
 
 class TestLeakage(unittest.TestCase):
 
     def test_leakage_model(self):
-
         # Create class and open network
-        d = epanet("Net1.inp")
+        d = epanet(networks.inp_files().Net1)
 
         # Single period analysis
         error = d.api.ENsettimeparam(d.ToolkitConstants.EN_DURATION, 0)

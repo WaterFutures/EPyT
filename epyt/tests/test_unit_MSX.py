@@ -3,16 +3,16 @@ import unittest
 
 from epyt import epanet, networks
 
-DIRNAME = os.path.dirname(networks.__file__)
-
 
 class MSXtest(unittest.TestCase):
 
     def setUp(self):
         """Call before every test case."""
         # Create EPANET object using the INP file.
-        inpname = os.path.join(DIRNAME, 'msx-examples', 'Net3-NH2CL.inp')
-        msxfile = os.path.join(DIRNAME, 'msx-examples', 'Net3-NH2CL.msx')
+        self.inps = networks.inp_files()
+        self.msxs = networks.msx_files()
+        inpname = self.inps.Net3_NH2CL
+        msxfile = self.msxs.Net3_NH2CL
         self.epanetClass = epanet(inpname)
         self.msxClass = self.epanetClass.loadMSXFile(msxfile)
 
@@ -443,9 +443,9 @@ class MSXtest(unittest.TestCase):
     def test_MSXgetqual(self):
         self.msxClass.MSXclose()
         self.epanetClass.unload()
-        inpname = os.path.join(DIRNAME, 'msx-examples', 'net2-cl2.inp')
+        inpname = self.inps.net2_cl2
         self.epanetClass = epanet(inpname)
-        file_path = os.path.join(DIRNAME, 'msx-examples', 'net2-cl2.msx')
+        file_path = self.msxs.net2_cl2
         self.msxClass = self.epanetClass.loadMSXFile(file_path)
 
         self.msxClass.MSXsolveH()
