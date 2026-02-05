@@ -1381,7 +1381,8 @@ class epanetapi:
         else:
             values_array = (c_float * num_nodes)()
             self.errcode = self._lib.ENgetnodevalues(property, values_array)
-        self.ENgeterror()
+        if self.errcode != 240:
+            self.ENgeterror()
         return list(values_array)
 
     def ENgetnumdemands(self, index):

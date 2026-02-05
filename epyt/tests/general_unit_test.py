@@ -817,8 +817,7 @@ class GetTest(unittest.TestCase):
         """ ---getLinkPumpType---    """
         err_msg = 'Wrong Pump Type'
         # Test 12
-        self.assertEqual(d.getLinkPumpType(), ['CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM',
-                                               'CUSTOM', 'CONSTANT_HORSEPOWER'],
+        self.assertEqual(d.getLinkPumpType(), ['CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM', 'CUSTOM', 'CONSTANT_HORSEPOWER'],
                          err_msg)
 
         """ ---getLinkPumpTypeCode---    """
