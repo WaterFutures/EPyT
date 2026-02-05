@@ -1,4 +1,4 @@
-﻿<a href="http://www.kios.ucy.ac.cy"><img src="https://www.kios.ucy.ac.cy/wp-content/uploads/2021/07/Logotype-KIOS.svg" width="200" height="100"/><a>
+﻿﻿<a href="http://www.kios.ucy.ac.cy"><img src="https://www.kios.ucy.ac.cy/wp-content/uploads/2021/07/Logotype-KIOS.svg" width="200" height="100"/><a>
 
 [![license](https://img.shields.io/pypi/l/epyt.svg)](https://github.com/KIOS-Research/EPyT/blob/main/LICENSE.md)
 [![pypi](https://img.shields.io/pypi/v/epyt.svg)](https://pypi.org/project/epyt/)
@@ -29,10 +29,11 @@ For support, please use the OWA community forum: https://github.com/orgs/OpenWat
 - [Contributors](#contributors)
 - [Contributing](#contributing)
 - [Recommendation](#recommendation)
-- [List of Python Class Functions](#list-of-python-class-functions)
-- [List of MSX Functions](#list-of-msx-functions)
-- [List of EPANET 2.2 Functions](#list-of-epanet-22-functions)
+- [List of EPyT Functions](#list-of-epyt-functions)
+- [List of EPANET 2.2 Functions](#list-of-epanet-2012-functions-supported)
+- [List of EPANET 2.3 Functions Supported](#list-of-epanet-23-functions-supported)
 - [List of EPANET MSX Functions API](#list-of-epanet-msx-functions-api)
+
 ## How to cite 
 
 Kyriakou, M. S., Demetriades, M., Vrachimis, S. G., Eliades, D. G., & Polycarpou, M. M. (2023). EPyT: An EPANET-Python Toolkit for Smart Water Network Simulations. Journal of Open Source Software, 8(92), 5947. https://doi.org/10.21105/joss.05947
@@ -143,7 +144,7 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 
 &uparrow; [Back to top](#table-of-contents)
 
-## List of Python Class Functions
+## List of EPyT Functions
 
 | Function                            |Description|
 |-------------------------------------|---------------------------|
@@ -588,7 +589,10 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | useHydraulicFile                    | Uses the contents of the specified file as the current binary hydraulics file |
 | writeLineInReportFile               | Writes a line of text to the EPANET report file |
 | writeReport                         | Writes a formatted text report on simulation results to the Report file |
-## <b> MSX Functions </b>            
+
+## <b> MSX Functions </b> 
+| Function                            |Description|
+|-------------------------------------|---------------------------|
 | addMSXPattern                   | Adds a new, empty MSX source time pattern to the project |
 | getMSXAreaUnits                 | Retrieves the area units (FT2/M2/CM2) |
 | getMSXAtol                      | Retrieves the absolute concentration tolerance |
@@ -680,176 +684,6 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | unloadMSX                       | Unloads MSX file |
 | writeMSXFile                    | Write a new MSX file |
 | writeMSXReport                  | Writes MSX report |
-
-## List of EPANET 2.2 Functions API
-
-| Function                 | Description                                                                                                                                                           |
-|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| ENaddcontrol             | Adds a new simple control to a project |
-| ENaddcurve               | Adds a new data curve to a project |
-| ENadddemand              | Appends a new demand to a junction node demands list |
-| ENaddlink                | Adds a new link to a project |
-| ENaddnode                | Adds a new node to a project |
-| ENaddpattern             | Adds a new time pattern to a project |
-| ENaddrule                | Adds a new rule-based control to a project |
-| ENclearreport            | Clears the contents of a project's report file |
-| ENclose                  | Closes a project and frees all of its memory |
-| ENcloseH                 | Closes the hydraulic solver freeing all of its allocated memory |
-| ENcloseQ                 | Closes the water quality solver, freeing all of its allocated memory |
-| ENcopyreport             | Copies the current contents of a project's report file to another file |
-| ENcreateproject          | Copies the current contents of a project's report file to another file |
-| ENdeletecontrol          | Deletes an existing simple control |
-| ENdeletecurve            | Deletes a data curve from a project |
-| ENdeletedemand           | Deletes a demand from a junction node |
-| ENdeletelink             | Deletes a link from the project |
-| ENdeletenode             | Deletes a node from a project |
-| ENdeletepattern          | Deletes a time pattern from a project |
-| ENdeleteproject          | Deletes an EPANET project |
-| ENdeleterule             | Deletes an existing rule-based control|
-| ENepanet                 | Runs a complete EPANET simulation |
-| ENgetaveragepatternvalue | Retrieves the average of all pattern factors in a time pattern |
-| ENgetbasedemand          | Gets the base demand for one of a node's demand categories |
-| ENgetcomment             | Sets a comment to a specific index |
-| ENgetcontrol             | Retrieves the comment of a specific index of a type object |
-| ENgetcoord               | Gets the (x,y) coordinates of a node |
-| ENgetcount               | Retrieves the number of objects of a given type in a project |
-| ENgetcurve               | Retrieves all of a curve's data |
-| ENgetcurveid             | Retrieves the ID name of a curve given its index |
-| ENgetcurveindex          | Retrieves the index of a curve given its ID name |
-| ENgetcurvelen            | Retrieves the number of points in a curve |
-| ENgetcurvetype           | Retrieves a curve's type |
-| ENgetcurvevalue          | Retrieves the value of a single data point for a curve |
-| ENgetdemandindex         | Retrieves the index of a node's named demand category |
-| ENgetdemandmodel         | Retrieves the type of demand model in use and its parameters |
-| ENgetdemandname          | Retrieves the name of a node's demand category |
-| ENgetdemandpattern       | Retrieves the index of a time pattern assigned to one of a node's demand categories |
-| ENgetelseaction          | Gets the properties of an ELSE action in a rule-based control |
-| ENgeterror               | Returns the text of an error message generated by an error code, as warning |
-| ENgetflowunits           | Retrieves a project's flow units |
-| ENgetheadcurveindex      | Retrieves the curve assigned to a pump's head curve |
-| ENgetlinkid              | Gets the ID name of a link given its index |
-| ENgetlinkindex           | Gets the index of a link given its ID name |
-| ENgetlinknodes           | Gets the indexes of a link's start- and end-nodes |
-| ENgetlinktype            | Retrieves a link's type |
-| ENgetlinkvalue           | Retrieves a property value for a link |
-| ENgetnodeid              | Gets the ID name of a node given its index |
-| ENgetnodeindex           | Gets the index of a node given its ID name |
-| ENgetnodetype            | Retrieves a node's type given its index |
-| ENgetnodevalue           | Retrieves a property value for a node |
-| ENgetnumdemands          | Retrieves the number of demand categories for a junction node |
-| ENgetoption              | Retrieves the value of an analysis option |
-| ENgetpatternid           | Retrieves the ID name of a time pattern given its index |
-| ENgetpatternindex        | Retrieves the index of a time pattern given its ID name |
-| ENgetpatternlen          | Retrieves the number of time periods in a time pattern |
-| ENgetpatternvalue        | Retrieves a time pattern's factor for a given time period |
-| ENgetpremise             | Gets the properties of a premise in a rule-based control |
-| ENgetpumptype            | Retrieves the type of head curve used by a pump |
-| ENgetqualinfo            | Gets information about the type of water quality analysis requested |
-| ENgetqualtype            | Retrieves the type of water quality analysis to be run |
-| ENgetresultindex         | Retrieves the order in which a node or link appears in an output file |
-| ENgetrule                | Retrieves summary information about a rule-based control |
-| ENgetruleID              | Gets the ID name of a rule-based control given its index |
-| ENgetstatistic           | Retrieves a particular simulation statistic |
-| ENgetthenaction          | Gets the properties of a THEN action in a rule-based control |
-| ENgettimeparam           | Retrieves the value of a time parameter |
-| ENgettitle               | Retrieves the title lines of the project |
-| ENgetversion             | Retrieves the toolkit API version number |
-| ENgetvertex              | Retrieves the coordinate's of a vertex point assigned to a link |
-| ENgetvertexcount         | Retrieves the number of internal vertex points assigned to a link |
-| ENinit                   | Initializes an EPANET project |
-| ENinitH                  | Initializes a network prior to running a hydraulic analysis |
-| ENinitQ                  | Initializes a network prior to running a water quality analysis |
-| ENnextH                  | Determines the length of time until the next hydraulic event occurs in an extended period simulation |
-| ENnextQ                  | Advances a water quality simulation over the time until the next hydraulic event |
-| ENopen                   | Opens an EPANET input file & reads in network data |
-| ENopenH                  | Opens a project's hydraulic solver |
-| ENopenQ                  | Opens a project's water quality solver |
-| ENreport                 | Writes simulation results in a tabular format to a project's report file |
-| ENresetreport            | Resets a project's report options to their default values |
-| ENrunH                   | Computes a hydraulic solution for the current point in time |
-| ENrunQ                   | Makes hydraulic and water quality results at the start of the current time period available to a project's water quality solver |
-| ENsaveH                  | Transfers a project's hydraulics results from its temporary hydraulics file to its binary output file, where results are only reported at uniform reporting intervals |
-| ENsavehydfile            | Saves a project's temporary hydraulics file to disk |
-| ENsaveinpfile            | Saves a project's data to an EPANET-formatted text file |
-| ENsetbasedemand          | Sets the base demand for one of a node's demand categories |
-| ENsetcomment             | Sets a comment to a specific index |
-| ENsetcontrol             | Sets the properties of an existing simple control |
-| ENsetcoord               | Sets the (x,y) coordinates of a node |
-| ENsetcurve               | Assigns a set of data points to a curve |
-| ENsetcurveid             | Changes the ID name of a data curve given its index |
-| ENsetcurvevalue          | Sets the value of a single data point for a curve |
-| ENsetdemandmodel         | Sets the Type of demand model to use and its parameters |
-| ENsetdemandname          | Assigns a name to a node's demand category |
-| ENsetdemandpattern       | Sets the index of a time pattern used for one of a node's demand categories |
-| ENsetelseaction          | Sets the properties of an ELSE action in a rule-based control |
-| ENsetflowunits           | Sets a project's flow units |
-| ENsetheadcurveindex      | Assigns a curve to a pump's head curve |
-| ENsetjuncdata            | Sets a group of properties for a junction node |
-| ENsetlinkid              | Changes the ID name of a link |
-| ENsetlinknodes           | Sets the indexes of a link's start- and end-nodes |
-| ENsetlinktype            | Changes a link's type |
-| ENsetlinkvalue           | Sets a property value for a link |
-| ENsetnodeid              | Changes the ID name of a node |
-| ENsetnodevalue           | Sets a property value for a node |
-| ENsetoption              | Sets the value for an anlysis option |
-| ENsetpattern             | Sets the pattern factors for a given time pattern |
-| ENsetpatternid           | Changes the ID name of a time pattern given its index |
-| ENsetpatternvalue        | Sets a time pattern's factor for a given time period |
-| ENsetpipedata            | Sets a group of properties for a pipe link |
-| ENsetpremise             | Sets the properties of a premise in a rule-based control |
-| ENsetpremiseindex        | Sets the index of an object in a premise of a rule-based control |
-| ENsetpremisestatus       | Sets the status being compared to in a premise of a rule-based control |
-| ENsetpremisevalue        | Sets the value in a premise of a rule-based control |
-| ENsetqualtype            | Sets the type of water quality analysis to run |
-| ENsetreport              | Processes a reporting format command |
-| ENsetrulepriority        | Sets the priority of a rule-based control |
-| ENsetstatusreport        | Sets the level of hydraulic status reporting |
-| ENsettankdata            | Sets a group of properties for a tank node |
-| ENsetthenaction          | Sets the properties of a THEN action in a rule-based control |
-| ENsettimeparam           | Sets the value of a time parameter |
-| ENsettitle               | Sets the title lines of the project |
-| ENsetvertices            | Assigns a set of internal vertex points to a link |
-| ENsolveH                 | Runs a complete hydraulic simulation with results for all time periods written to a temporary hydraulics file |
-| ENsolveQ                 | Runs a complete water quality simulation with results at uniform reporting intervals written to the project's binary output file |
-| ENstepQ                  | Advances a water quality simulation by a single water quality time step |
-| ENusehydfile             | Uses a previously saved binary hydraulics file to supply a project's hydraulics |
-| ENwriteline              | Writes a line of text to a project's report file |
-
-## List of EPANET MSX Functions API (.msx)
-
-| Function           | Description                                                                                                                              |
-|--------------------|------------------------------------------------------------------------------------------------------------------------------------------|
-| MSXaddpattern      | Adds a new empty MSX source time pattern to an MSX project |
-| MSXclose           | Close .msx file |
-| MSXerror           | Retrieves the MSX erorr message for specific erorr code |
-| MSXgetID           | Retrieves the ID name of an object given its internal index number |
-| MSXgetIDlen        | Retrieves the number of characters in the ID name of an MSX object given its internal index number |
-| MSXgetconstant     | Retrieves the value of a particular rection constant |
-| MSXgetcount        | Retrieves the number of objects of a specific type |
-| MSXgeterror        | Returns the text for an error message given its error code |
-| MSXgetindex        | Retrieves the number of objects of a specific type |
-| MSXgetinitqual     | Retrieves the intial concetration of a particular chemical species assigned to a specific node or link of the pipe network |
-| MSXgetparameter    | Retrieves the value of a particular reaction parameter for a given pipe |
-| MSXgetpatternlen   | Retrieves the number of time periods within a source time pattern |
-| MSXgetpatternvalue | Retrieves the multiplier at a specific time period for a given source time pattern |
-| MSXgetqual         | Retrieves a chemical species concentration at a given node or the average concentration along a link at the current sumulation time step |
-| MSXgetsource       | Retrieves information on any external source of a particular chemical species assigned to a specific node or link of the pipe network |
-| MSXgetspecies      | Retrieves the attributes of a chemical species given its internal index number |
-| MSXinit            | Initialize the MSX system before solving for water quality results in the step-wise fashion |
-| MSXopen            | Opens .MSX file |
-| MSXreport          | Writes water quality simulations results as instructed by MSX input file to a text file |
-| MSXsavemsxfile     | Saves the data associated with the current MSX project into a new MSX input file |
-| MSXsaveoutfile     | Saves water quality results computed for each node, link and reporting time period to a named binary file |
-| MSXsetconstant     | Assigns a new value to a specific reaction constant |
-| MSXsetinitqual     | Assigns an initial concetration of a particular chemical species node or link of the pipe network |
-| MSXsetparameter    | Assigns a value to a particular reaction parameter for a given pipe or tank within the pipe network |
-| MSXsetpattern      | Assigns a new set of multipliers to a given MSX source time pattern |
-| MSXsetpatternvalue | Assigns a new value to the multiplier for a specific time period in a given MSX source time pattern |
-| MSXsetsource       | Sets the attributes of an external source of particular chemical species to specific node of the pipe network |
-| MSXsolveH          | Solves for system hydraulics over the entire simulation period saving results to an internal scratch file |
-| MSXsolveQ          | Solves for water quality over the entire simulation period and saves the results to an internal scratch file |
-| MSXstep            | Advances the water quality solution through a single water quality time step when performing a step-wise simulation |
-| MSXusehydfile      | Uses a previously saved EPANET hydraulics file as the source of hydraulic information |
 
 ## List of MSX Functions 
 |Function|Description|
@@ -946,21 +780,169 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | writeMSXFile                    | Write a new MSX file |
 | writeMSXReport                  | Writes MSX report |
 
+## List of EPANET 2.012 Functions Supported
 
-## List of EPANET 2.3 Functions API
+|Function|Description|
+|--------|-----------|
+|ENaddpattern|Adds a new time pattern to the network|
+|ENclose|Closes down the Toolkit system (including all files being processed)|
+|ENcloseH|Closes the hydraulic analysis system, freeing all allocated memory|
+|ENcloseQ|Closes the water quality analysis system, freeing all allocated memory|
+|ENepanet|Runs a complete EPANET simulation|
+|ENgetcount|Retrieves the number of network components of a specified type|
+|ENgetcontrol|Retrieves the parameters of a simple control statement|
+|ENgeterror|Retrieves the text of the message associated with a particular error or warning code|
+|ENgetflowunits|Retrieves a code number indicating the units used to express all flow rates|
+|ENgetlinkid|Retrieves the ID label of a link with a specified index|
+|ENgetlinkindex|Retrieves the index of a link with a specified ID|
+|ENgetlinknodes|Retrieves the indexes of the end nodes of a specified link|
+|ENgetlinktype|Retrieves the link-type code for a specific link|
+|ENgetlinkvalue|Retrieves the value of a specific link parameter|
+|ENgetnodeid|Retrieves the ID label of a node with a specified index|
+|ENgetnodeindex|Retrieves the index of a node with a specified ID|
+|ENgetnodetype|Retrieves the node-type code for a specific node|
+|ENgetnodevalue|Retrieves the value of a specific link parameter|
+|ENgetoption|Retrieves the value of a particular analysis option|
+|ENgetpatternid|Retrieves the ID label of a particular time pattern|
+|ENgetpatternindex|Retrieves the index of a particular time pattern|
+|ENgetpatternlen|Retrieves the number of time periods in a specific time pattern|
+|ENgetpatternvalue|Retrieves the multiplier factor for a specific time period in a time pattern|
+|ENgetqualtype|Retrieves the type of water quality analysis called for|
+|ENgettimeparam|Retrieves the value of a specific analysis time parameter|
+|ENgetversion|Retrieves the version number|
+|ENinitH|Initializes hydraulic analysis|
+|ENinitQ|Initializes water quality analysis|
+|ENnextH|Determine time (in seconds) until next hydraulic event|
+|ENnextQ|Advances WQ simulation to next hydraulic event|
+|ENopen|Opens EPANET input file & reads in network data|
+|ENopenH|Sets up data structures for hydraulic analysis|
+|ENopenQ|Sets up data structures for WQ analysis|
+|ENreport|Writes simulation report to the report file|
+|ENresetreport|Resets report options to default values|
+|ENrunH|Run a hydraulic solution period|
+|ENrunQ|Retrieves hydraulic & WQ results at time t|
+|ENsaveH|Saves hydraulic results to binary file|
+|ENsavehydfile|Copies binary hydraulics file to disk|
+|ENsaveinpfile|Saves current data to "INP" formatted text file|
+|ENsetcontrol|Specify parameters to define a simple control|
+|ENsetlinkvalue|Set a proprty value for a link|
+|ENsetnodevalue|Set a property value for a node|
+|ENsetoption|Set a value for an anlysis option|
+|ENsetpattern|Set multipliers for a specific pattern|
+|ENsetpatternvalue|Set the multiplier for a specific pattern at a specific period|
+|ENsetqualtype|Sets the type of water quality analysis called|
+|ENsetreport|Processes a reporting format command|
+|ENsetstatusreport|Sets the level of hydraulic status reporting|
+|ENsettimeparam|Set the value for a time parameter|
+|ENsolveH|Solves the network hydraulics for all time periods|
+|ENsolveQ|Solves for network water quality in all time periods|
+|ENstepQ|Advances WQ simulation by a single WQ time step|
+|ENusehydfile|Opens previously saved binary hydraulics file|
+|ENwriteline|Writes line of text to the report file|
 
-| Function            | Description                                                                                  |
-|---------------------|----------------------------------------------------------------------------------------------|
-| ENgetcontrolenabled | Retrieves the enabled state of a specified control in the EPANET model. |
-| ENgetlinkvalues     | Retrieves property values for all links in the hydraulic model |
-| ENgetruleenabled    | etrieves the enabled state of a specific rule in the EPANET model using API. |
-| ENloadpatternfile   | loads time patterns from a file into a project under a specific pattern ID using API |
-| ENopenX             | enable the opening of input files with formatting errors through the API |
-| ENsetcontrolenabled | Sets the control state to either enable or disable in the EPANET model usin API. |
-| ENsetcurvetype      | Sets the type of a specified curve in the EPANET model using API. |
-| ENsetruleenabled    | Enables a specific rule in the EPANET model using API. |
-| ENsetvertex         | Sets the coordinates of a vertex point in a link within the EPANET model using API. |
-| ENtimetonextevent   | Determines the type of event that will cause the end of the current time step/duration/index |
+&uparrow; [Back to top](#table-of-contents)
+
+## List of EPANET 2.1 Functions Supported
+
+|Function|Description|
+|--------|-----------|
+|ENaddcurve|Adds a new curve appended to the end of the existing curves|
+|ENgetaveragepatternvalue|Retrieves the average value of a pattern|
+|ENgetbasedemand|Retrieves the nodes base demand for a category|
+|ENgetcoord|Retrieves coordinate x, y for a node|
+|ENgetcurve|Retrieves a curve's properties|
+|ENgetcurveid|Retrieves ID of a curve with specific index|
+|ENgetcurveindex|Retrieves index of curve with specific ID|
+|ENgetcurvelen|Retrieves number of points in a curve|
+|ENgetcurvevalue|Retrieves x,y point for a specific point number and curve|
+|ENgetdemandpattern|Retrieves the index of a demand pattern for a specific demand category of a node|
+|ENgetheadcurveindex|Retrieves index of a head curve for specific link index|
+|ENgetnumdemands|Retrieves the number of demand categories for a node|
+|ENgetpumptype|Retrieves the type of a pump for specific link index|
+|ENgetqualinfo|Retrieves quality analysis information (type, chemical name, units, trace node ID)|
+|ENgetstatistic|Retrieves hydraulic simulation statistic|
+|ENsetbasedemand|Sets the nodes base demand for a category|
+|ENsetcoord|Sets coordinate x, y for a node|
+|ENsetcurve|Sets x,y values for a specific curve|
+|ENsetcurvevalue|Sets x,y point for a specific point and curve|
+
+&uparrow; [Back to top](#table-of-contents)
+
+## List of EPANET 2.2 Functions Supported
+
+|Function|Description|
+|--------|-----------|
+|ENaddcontrol|Specify parameters to add a new simple control|
+|ENaddlink|Adds a new link|
+|ENaddnode|Adds a new node|
+|ENaddrule|Adds a new rule-based control to a project|
+|ENadddemand|Appends a new demand to a junction node demands list|
+|ENclearreport|Clears the contents of a project's report file|
+|ENcopyreport|Copies the current contents of a project's report file to another file|
+|ENdeletelink|Deletes a link|
+|ENdeletenode|Deletes a node|
+|ENdeletedemand|Deletes a demand from a junction node|
+|ENsetcurveid|Changes the ID name of a data curve given its index|
+|ENsetpatternid|Changes the ID name of a time pattern given its index|
+|ENsetdemandpattern|Sets the index of the demand pattern assigned to a node for a category index|
+|ENsetheadcurveindex|Sets the curve index for a specified pump index|
+|ENgetcurvetype|Retrieves the type of a curve|
+|ENgetdemandindex|Retrieves the index of a node's named demand category|
+|ENgetpremise|Gets the properties of a premise in a rule-based control|
+|ENgetelseaction|Gets the properties of an ELSE action in a rule-based control|
+|ENgetruleid|Gets the ID name of a rule-based control given its index|
+|ENgetrule|Retrieves summary information about a rule-based control|
+|ENgetthenaction|Gets the properties of a THEN action in a rule-based control|
+|ENsetflowunits|Sets the flow units|
+|ENgetdemandmodel|Retrieves the type of demand model in use and its parameters|
+|ENsetdemandmodel|Sets the type of demand model to use and its parameters|
+|ENsetelseaction|Sets the properties of an ELSE action in a rule-based control|
+|ENsetnodeid|Change the ID name for a node|
+|ENsetlinkid|Change the ID name for a link|
+|ENsetpipedata|Sets a group of properties for a pipe link|
+|ENsetpremise|Sets the properties of a premise in a rule-based control|
+|ENsetpremiseindex|Sets the index of an object in a premise of a rule-based control|
+|ENsetpremisestatus|Sets the status being compared to in a premise of a rule-based control|
+|ENsetpremisevalue|Sets the value in a premise of a rule-based control|
+|ENsetrulepriority|Sets the priority of a rule-based control|
+|ENsettankdata|Sets a group of properties for a tank node|
+|ENsetthenaction|Sets the properties of a THEN action in a rule-based control|
+|ENgettitle|Retrieves the title lines of the project|
+|ENsettitle|Sets the title lines of the project|
+|ENsetlinknodes|Sets the indexes of a link's start- and end-nodes|
+|ENsetlinktype|Changes the type of a particular link (e.g. pipe to pump)|
+|ENgetdemandname|Gets the name of a node's demand category|
+|ENsetdemandname|Assigns a name to a node's demand category|
+|ENgetcomment|Retrieves the comment string assigned to the object (NODE, LINK, TIMEPAT or CURVE)|
+|ENsetcomment|Sets the comment string assigned to the object (NODE, LINK, TIMEPAT or CURVE)|
+|ENdeletepattern|Deletes a time pattern from a project|
+|ENdeletecurve|Deletes a data curve from the project|
+|ENdeletecontrol|Deletes an existing simple control|
+|ENdeleterule|Deletes an existing rule-based control|
+|ENsetjuncdata|Sets a group of properties for a junction node|
+|ENgetvertex|Retrieves the coordinate's of a vertex point assigned to a link|
+|ENgetvertexcount|Retrieves the number of internal vertex points assigned to a link|
+|ENsetvertices|Assigns a set of internal vertex points to a link|
+|ENgetresultindex|Retrieves the order in which a node's or link's results were saved to an output file|
+|ENinit|Initializes an EPANET project that isn't opened with an input file|
+
+&uparrow; [Back to top](#table-of-contents)
+
+## List of EPANET 2.3 Functions Supported
+
+|Function|Description|
+|--------|-----------|
+|ENgetcontrolenabled|Get enabled/disabled flag for a simple control by index (1 = enabled, 0 = disabled)|
+|ENgetlinkvalues|Bulk-retrieve property values for all links for a given link property code|
+|ENgetnodevalues|Bulk-retrieve property values for all nodes for a given node property code|
+|ENgetruleenabled|Get enabled/disabled flag for a rule-based control by rule index|
+|ENloadpatternfile|Load time patterns from an external file into the current project under a specific pattern ID|
+|ENopenX|Open an input file even if it has formatting errors (lenient parsing mode)|
+|ENsetcontrolenabled|Enable/disable a specific simple control by index|
+|ENsetcurvetype|Set the type of a curve object (volume, pump, efficiency, headloss, general, valve)|
+|ENsetruleenabled|Enable/disable a rule by rule index|
+|ENsetvertex|Set the coordinates of a link’s intermediate vertex (polyline point) by vertex index|
+|ENtimetonextevent|Return the type of event that terminates the current time step (hydraulic step, water quality step, tank level event, control event)|
 
 ## List of EPANET MSX Functions API
 
@@ -997,7 +979,5 @@ If you want to contribute, please check out our [Code of Conduct](https://github
 | MSXsolveQ          | Solves for water quality over the entire simulation period and saves the results to an internal scratch file |
 | MSXstep            | Advances the water quality solution through a single water quality time step when performing a step-wise simulation |
 | MSXusehydfile      | Uses a previously saved EPANET hydraulics file as the source of hydraulic information |
-
-
 
 &uparrow; [Back to top](#table-of-contents)
