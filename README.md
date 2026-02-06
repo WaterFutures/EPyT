@@ -57,7 +57,7 @@ year = {2023}
 
 ## Requirements
 
-* Python >=3.8
+* Python >=3.9
 * Windows, OSX or Linux
 * [EPANET 2.2](https://github.com/OpenWaterAnalytics/epanet)
 
