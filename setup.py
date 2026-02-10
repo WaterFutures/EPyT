@@ -68,6 +68,6 @@ setup(
     ],
     python_requires=">=3.9",
     package_data={f'{module_name}': data},
-    install_requires=['cffi>=2.0.0', 'numpy>=1.24.4', 'matplotlib>=3.7.5', 'pandas>=2.0.3', 'XlsxWriter>=3.2.0', 'setuptools'],
+    install_requires=['cffi>=2.0.0', 'numpy>=2.0.2', 'matplotlib>=3.8', 'pandas>=2.0.3', 'XlsxWriter>=3.2.0', 'setuptools'],
     include_package_data=True
 )
